@@ -536,7 +536,7 @@ await test('Test 14: sanity hints', async () => {
   await page.waitForSelector('#screen-refine:not(.hidden)');
   check(await skipUntil(page, /must the first version/i), 'features question not reached');
   await page.fill('#q-free', 'View series info'); await page.click('#q-next');
-  check(/Only one must-have feature/.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when the single view-only feature was entered');
+  check(/where that information comes from/.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when the only feature looks things up without a source');
   // Experience is essential now, so it comes before the important questions.
   check(await skipUntil(page, /comfortable are you with code/i), 'experience question not reached');
   await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next'); // Beginner
@@ -551,7 +551,7 @@ await test('Test 14: sanity hints', async () => {
   const hints = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
   log('  hints: ' + hints.replace(/\s+/g, ' ').trim());
   check(/nothing needs to be saved/i.test(hints), 'no hint about a catalog that saves nothing');
-  check(/how the information gets into the app/.test(hints), 'no hint about a single view-only feature');
+  check(/where that information comes from/.test(hints), 'no hint about a lookup with no data source');
   check(/named React — a steep first project/.test(hints), 'no hint about a beginner choosing React');
   // "change answer" on a hint reopens that question; a real answer clears the hint.
   await page.click('#sanity [data-ask="data"]');
@@ -560,7 +560,38 @@ await test('Test 14: sanity hints', async () => {
   await page.click('#q-chips .chip >> nth=1'); await page.click('#q-next'); // "Save on the device only"
   await page.waitForSelector('#screen-result:not(.hidden)');
   const after = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
-  check(!/nothing needs to be saved/i.test(after) && /how the information gets into the app/.test(after), 'hints did not update after changing the data answer');
+  check(!/nothing needs to be saved/i.test(after) && /where that information comes from/.test(after), 'hints did not update after changing the data answer');
+  await page.context().close();
+});
+
+// ---------- Test 14b: the two data warnings fire on the right projects, not every project ----------
+await test('Test 14b: warning precision', async () => {
+  const page = await newPage(null);
+  const run = async (desc, features, dataChip) => {
+    await page.goto(FILE); // a fresh interview each time
+    await page.fill('#idea', desc);
+    await page.click('#start-btn');
+    await page.waitForSelector('#screen-refine:not(.hidden)');
+    check(await skipUntil(page, /must the first version/i), 'features question not reached');
+    await page.fill('#q-free', features); await page.click('#q-next');
+    if (dataChip !== null) {
+      check(await skipUntil(page, /remember anything between uses/i), 'data question not reached');
+      await page.click('#q-chips .chip >> nth=' + dataChip); await page.click('#q-next');
+    }
+    await skipUntil(page, /never matches/);
+    await page.waitForSelector('#screen-result:not(.hidden)');
+    return page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
+  };
+  // A lookup tool that saves nothing: only the "where does the information come from" warning.
+  let h = await run('A web app to organize book series in chronological order.', 'Type a book title\nSee the series it belongs to, in order', 0);
+  log('  lookup, no source, nothing saved -> ' + h.replace(/\s+/g, ' ').slice(0, 90));
+  check(/where that information comes from/.test(h) && !/nothing needs to be saved/i.test(h), 'lookup tool: expected only the source warning');
+  // The same tool with a named source: no data warnings at all.
+  h = await run('A web app to organize book series in chronological order.', 'Type a book title\nLook it up in the Open Library database and show its series in order', 0);
+  check(!/where that information comes from/.test(h) && !/nothing needs to be saved/i.test(h), 'lookup with a source: expected no data warnings, got: ' + h);
+  // A record keeper that saves nothing: only the "nothing saved" warning.
+  h = await run('A web app for my flying club.', 'Add a flight with date and model\nShow all flights per model', 0);
+  check(/nothing needs to be saved/i.test(h) && !/where that information comes from/.test(h), 'record keeper: expected only the saving warning, got: ' + h);
   await page.context().close();
 });
 

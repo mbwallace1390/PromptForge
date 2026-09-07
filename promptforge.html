@@ -1404,16 +1404,22 @@ function pinSections(text) {
  * Cheap consistency checks a human reviewer would raise. Each hint names the dimension to revisit.
  * Heuristic and non-blocking: shown as "worth checking" on the result screen.
  */
+// The two data warnings complement each other: a tool that adds or tracks records but saves nothing gets the
+// first; a tool that looks things up but never says where the information comes from gets the second.
+const KEEPS_RECORDS_RE = /\b(add(?:ing|s)?|enter(?:ing|s)?|log(?:ging|s)?|track(?:ing|s)?|record(?:ing|s)?|sav(?:e|es|ing)|keeps? track|manag(?:e|es|ing)|edit(?:ing|s)?|updat(?:e|es|ing)|input|catalog(?:u)?(?:e|es|ing)?|inventory|journal|notes?)\b/i;
+const LOOKS_UP_RE = /\b(look(?:s|ed)? ?up|lookup|search(?:es)?|find(?:s)?|see(?:s)? (?:the|which|what)|belongs? to|retriev(?:e|es)|display(?:s|ed)?|show(?:s|ed)?|list(?:s|ed)?|browse|view(?:s|ed)?|sorted|ordered)\b/i;
+// Entering records is itself a source ("add a flight"); typing a query is not ("type a book title"), so bare "type" is out.
+const HAS_SOURCE_RE = /\b(add(?:s|ing)?|enter(?:s|ing)?|type in|creat(?:e|es|ing)|record(?:s|ing)?|log(?:s|ging)?|import(?:s|ed|ing)?|upload(?:s|ed|ing)?|fetch(?:es|ed|ing)?|pull(?:s|ed|ing)?|sync(?:s|ed|ing)?|scan(?:s|ned|ning)?|api|database|spreadsheet|csv|json|xml|file|paste[ds]?|manual(?:ly)? (?:input|entry|entered)|(?:from|via) (?:a|an|the)? ?(?:website|service|site|catalog(?:ue)?|library system|internet|open library|google books|goodreads|wikipedia))\b/i;
 function sanityHints() {
   const hints = [];
-  const everything = [state.description, val('purpose'), val('coreFeatures')].join('\n');
-  if (dataMode(state.answers.data) === 'none' && /\b(catalog(ue)?|log|track|record|history|inventory|library|list|manage|save|notes?|journal|database|collection)\b/i.test(everything)) {
+  const everything = [state.description, val('purpose'), val('coreFeatures'), val('integrations')].join('\n');
+  const work = [state.description, val('purpose'), val('coreFeatures')].join('\n'); // what the app does, in the person's own words
+  if (dataMode(state.answers.data) === 'none' && KEEPS_RECORDS_RE.test(work)) {
     hints.push({ dim: 'data', text: 'You said nothing needs to be saved, but this sounds like it keeps records (catalog, log, track…). If the data must survive closing the app, change the Data & accounts answer.' });
   }
-  const feats = toList(val('coreFeatures'));
-  if (feats.length === 1 && /\b(view|see|show|display|browse|look at|read|list)\b/i.test(feats[0]) && !/\b(add|create|enter|import|upload|edit|log|record|sync|fetch|pull|scan|type)\b/i.test(feats[0])) {
-    // Phrased as a question with one example: a list of options here got copied in as three features once.
-    hints.push({ dim: 'coreFeatures', text: "Only one must-have feature, and it's about viewing. Add one that says how the information gets into the app, in your own words (for example: \"staff type it in\"). Otherwise the AI will guess." });
+  // Phrased with examples in quotes, not as a list of options: a list here got copied in as three features once.
+  if (LOOKS_UP_RE.test(val('coreFeatures')) && !HAS_SOURCE_RE.test(everything)) {
+    hints.push({ dim: 'coreFeatures', text: 'The app looks things up or shows them, but nothing says where that information comes from. Add a feature that says so, in your own words (for example: "staff type in each series" or "it comes from a public book database"). Otherwise the AI has to guess.' });
   }
   // Frameworks and infrastructure, not languages: our own chip says "JavaScript / TypeScript" and must not trip this.
   const heavy = /\b(react(?: native)?|angular|vue|svelte|next\.?js|nuxt|django|rails|spring|kubernetes|docker|graphql|redux|webpack|flutter)\b/i.exec(val('techStack'));
