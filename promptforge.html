@@ -1,0 +1,1792 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>PromptForge — turn a rough idea into a build-ready AI prompt</title>
+<meta name="description" content="Describe what you want to build in plain words. PromptForge asks the follow-up questions a good consultant would, then writes a detailed prompt you can paste into Claude, ChatGPT, Cursor or any AI coding tool.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161a22'/%3E%3Cpath d='M32 10c6 8 12 12 12 22a12 12 0 0 1-24 0c0-5 2-8 4-11 0 5 2 7 4 8 0-9 2-14 4-19z' fill='%23f5a524'/%3E%3C/svg%3E">
+<style>
+/* ---------- Design tokens ---------- */
+:root {
+  --bg: #0f1115;
+  --bg-2: #161a22;
+  --bg-3: #1d222c;
+  --bg-4: #252b37;
+  --border: #2a3040;
+  --border-strong: #3a4256;
+  --text: #e8ebf2;
+  --muted: #98a0b3;
+  --faint: #6b7385;
+  --accent: #f5a524;
+  --accent-2: #ffc75c;
+  --accent-ink: #1a1200;
+  --accent-soft: rgba(245,165,36,.14);
+  --ok: #3fbf7f;
+  --ok-soft: rgba(63,191,127,.15);
+  --warn: #f0a530;
+  --bad: #e5533d;
+  --bad-soft: rgba(229,83,61,.14);
+  --info: #5aa9ff;
+  --info-soft: rgba(90,169,255,.14);
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 12px 34px rgba(0,0,0,.38);
+  --shadow-sm: 0 3px 10px rgba(0,0,0,.25);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+[data-theme="light"] {
+  --bg: #f4f5f9;
+  --bg-2: #ffffff;
+  --bg-3: #eef0f5;
+  --bg-4: #e4e7ef;
+  --border: #dcdfe8;
+  --border-strong: #c6cbd8;
+  --text: #171a21;
+  --muted: #5b6375;
+  --faint: #8a91a3;
+  --accent: #d97b00;
+  --accent-2: #b86500;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(217,123,0,.12);
+  --ok: #1f9d5c;
+  --ok-soft: rgba(31,157,92,.12);
+  --bad: #d3452f;
+  --bad-soft: rgba(211,69,47,.1);
+  --info: #2f7fe0;
+  --info-soft: rgba(47,127,224,.12);
+  --shadow: 0 12px 34px rgba(25,35,60,.10);
+  --shadow-sm: 0 3px 10px rgba(25,35,60,.08);
+}
+
+/* ---------- Base ---------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  font-size: 15.5px;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+body::before {
+  /* soft ambient glow behind the header */
+  content: "";
+  position: fixed; inset: -40vh 0 auto 0; height: 70vh; z-index: -1;
+  background: radial-gradient(60% 55% at 50% 0%, var(--accent-soft), transparent 70%);
+  pointer-events: none;
+}
+h1, h2, h3, h4 { margin: 0 0 .4em; line-height: 1.2; letter-spacing: -.01em; }
+h1 { font-size: clamp(1.7rem, 3.5vw, 2.4rem); font-weight: 750; }
+h2 { font-size: 1.35rem; font-weight: 700; }
+h3 { font-size: 1.02rem; font-weight: 700; }
+p { margin: 0 0 1em; }
+a { color: var(--info); }
+button { font: inherit; color: inherit; cursor: pointer; }
+textarea, input, select {
+  font: inherit; color: var(--text);
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: .7rem .85rem;
+  width: 100%; outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+textarea:focus, input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+::placeholder { color: var(--faint); }
+.hidden { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: var(--muted); }
+.small { font-size: .86rem; }
+.tiny { font-size: .78rem; }
+kbd { font-family: var(--mono); font-size: .78em; background: var(--bg-4); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 5px; padding: 0 .35em; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+  padding: .62rem 1.05rem; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--bg-3); font-weight: 600; font-size: .95rem; line-height: 1.2;
+  transition: transform .08s, background .15s, border-color .15s, box-shadow .15s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg-4); border-color: var(--faint); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; box-shadow: 0 6px 18px var(--accent-soft); }
+.btn.primary:hover { background: var(--accent-2); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--text); background: var(--bg-3); }
+.btn.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
+.btn.danger:hover { background: var(--bad-soft); }
+.btn.sm { padding: .42rem .8rem; font-size: .86rem; }
+.btn.lg { padding: .8rem 1.4rem; font-size: 1.02rem; }
+.btn.icon { padding: .5rem; width: 38px; height: 38px; border-radius: 50%; }
+.btn .spin { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Layout ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 1rem; justify-content: space-between;
+  padding: .7rem clamp(1rem, 3vw, 2rem);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: .55rem; font-weight: 800; font-size: 1.1rem; letter-spacing: -.01em; }
+.brand svg { width: 28px; height: 28px; }
+.brand .tag { font-size: .68rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: .1rem .5rem; letter-spacing: .04em; text-transform: uppercase; }
+.steps { display: flex; gap: .25rem; align-items: center; }
+.steps .step { display: flex; align-items: center; gap: .45rem; padding: .35rem .75rem; border-radius: 999px; color: var(--faint); font-size: .86rem; font-weight: 600; }
+.steps .step .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--bg-3); border: 1px solid var(--border-strong); font-size: .75rem; }
+.steps .step.active { color: var(--text); background: var(--bg-3); }
+.steps .step.active .n { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.steps .step.done .n { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.steps .sep { color: var(--border-strong); }
+.topbar .actions { display: flex; align-items: center; gap: .4rem; }
+.ai-badge { display: inline-flex; align-items: center; gap: .4rem; font-size: .8rem; font-weight: 700; padding: .35rem .7rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--bg-2); cursor: pointer; white-space: nowrap; }
+.ai-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.ai-badge.on { color: var(--ok); border-color: var(--ok); }
+.ai-badge.on .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+
+main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) clamp(1rem, 3vw, 2rem) 5rem; }
+.screen { animation: fade .25s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1.5rem; align-items: start; }
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: 1fr; }
+  .steps .step span.lbl { display: none; }
+  .steps .step { padding: .35rem .45rem; }
+}
+@media (max-width: 560px) {
+  .steps { display: none; }
+  body { font-size: 15px; }
+}
+.card {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: clamp(1rem, 2.5vw, 1.6rem); box-shadow: var(--shadow-sm);
+}
+.card + .card { margin-top: 1rem; }
+.sticky { position: sticky; top: 76px; }
+
+/* ---------- Screen 1: Describe ---------- */
+.hero { text-align: center; max-width: 720px; margin: 0 auto 1.6rem; }
+.hero p { color: var(--muted); font-size: 1.05rem; }
+.idea-box { max-width: 820px; margin: 0 auto; }
+#idea { min-height: 170px; font-size: 1.02rem; padding: 1rem 1.1rem; border-radius: var(--radius); background: var(--bg-2); box-shadow: var(--shadow-sm); }
+.idea-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .8rem; flex-wrap: wrap; }
+.examples { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; color: var(--muted); font-size: .86rem; }
+.chip {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .45rem .85rem; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--bg-2); font-size: .9rem; font-weight: 500; color: var(--text);
+  transition: background .12s, border-color .12s, color .12s, transform .08s; text-align: left; line-height: 1.25;
+}
+.chip:hover { border-color: var(--accent); background: var(--accent-soft); }
+.chip:active { transform: scale(.98); }
+.chip.selected { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 650; }
+.chip.example { font-size: .82rem; padding: .35rem .7rem; color: var(--muted); }
+.chip.example:hover { color: var(--text); }
+.depth { display: inline-flex; background: var(--bg-3); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
+.depth button { border: 0; background: transparent; padding: .38rem .8rem; border-radius: 999px; font-size: .86rem; font-weight: 600; color: var(--muted); }
+.depth button.on { background: var(--bg-2); color: var(--text); box-shadow: var(--shadow-sm); }
+.recent { max-width: 820px; margin: 2.2rem auto 0; }
+.recent h3 { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: .9rem; text-transform: uppercase; letter-spacing: .06em; }
+.recent-list { display: grid; gap: .5rem; }
+.recent-item { display: flex; align-items: center; gap: .8rem; padding: .7rem .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-2); }
+.recent-item .t { flex: 1; min-width: 0; }
+.recent-item .t b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 650; }
+.recent-item .t span { color: var(--faint); font-size: .8rem; }
+
+/* ---------- Screen 2: Refine ---------- */
+.progress { display: flex; align-items: center; gap: .9rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.bar { flex: 1; min-width: 140px; height: 10px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 999px; transition: width .4s ease; }
+.strength { font-weight: 700; font-size: .9rem; white-space: nowrap; }
+.strength small { color: var(--muted); font-weight: 500; }
+.qcard .q-meta { display: flex; align-items: center; gap: .6rem; color: var(--faint); font-size: .82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .6rem; }
+.qcard .q-meta .ai-mark { color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 700; }
+.qcard h2 { font-size: 1.45rem; margin-bottom: .35rem; }
+.qcard .why { color: var(--muted); margin-bottom: 1rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; margin: .3rem 0 1rem; }
+.q-free { min-height: 74px; }
+.q-free.big { min-height: 150px; font-family: var(--font); }
+.q-hint { color: var(--faint); font-size: .82rem; margin: .4rem 0 0; }
+.q-actions { display: flex; align-items: center; gap: .5rem; margin-top: 1.1rem; flex-wrap: wrap; }
+.q-actions .spacer { flex: 1; }
+.finish-row { margin-top: 1rem; display: flex; justify-content: center; gap: .6rem; flex-wrap: wrap; }
+.thinking { display: flex; align-items: center; gap: .9rem; padding: 1.4rem; color: var(--muted); }
+.thinking .spin { width: 22px; height: 22px; border: 3px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; flex: none; }
+
+/* Brief panel */
+.brief h3 { display: flex; align-items: center; justify-content: space-between; }
+.brief h3 .count { color: var(--faint); font-weight: 500; font-size: .8rem; }
+.brief-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .55rem; }
+.brief-item { padding: .55rem .7rem; border-radius: var(--radius-sm); background: var(--bg-3); border: 1px solid var(--border); }
+.brief-item .k { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); font-weight: 700; display: flex; justify-content: space-between; gap: .4rem; }
+.brief-item .v { font-size: .9rem; margin-top: .15rem; white-space: pre-wrap; word-break: break-word; }
+.brief-item .v.faint { color: var(--faint); font-style: italic; }
+.pill { font-size: .66rem; padding: .05rem .45rem; border-radius: 999px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.pill.detected { background: var(--info-soft); color: var(--info); }
+.pill.delegate { background: var(--accent-soft); color: var(--accent); }
+.pill.skipped { background: var(--bad-soft); color: var(--bad); }
+.pill.ai { background: var(--ok-soft); color: var(--ok); }
+.brief-empty { color: var(--faint); font-size: .9rem; font-style: italic; }
+.brief-desc { font-size: .88rem; color: var(--muted); max-height: 120px; overflow: auto; padding: .5rem .7rem; background: var(--bg-3); border-radius: var(--radius-sm); border: 1px dashed var(--border-strong); margin-bottom: .7rem; white-space: pre-wrap; }
+
+/* ---------- Screen 3: Result ---------- */
+.result-toolbar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .8rem; }
+.tabs { display: inline-flex; background: var(--bg-3); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
+.tabs button { border: 0; background: transparent; padding: .38rem .85rem; border-radius: 999px; font-size: .86rem; font-weight: 600; color: var(--muted); display: inline-flex; gap: .4rem; align-items: center; }
+.tabs button.on { background: var(--bg-2); color: var(--text); box-shadow: var(--shadow-sm); }
+.tabs button:disabled { opacity: .45; cursor: not-allowed; }
+.prompt-wrap { position: relative; }
+#prompt-view {
+  font-family: var(--mono); font-size: .86rem; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word;
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 1.1rem 1.2rem; margin: 0; max-height: 70vh; overflow: auto;
+}
+#prompt-edit { font-family: var(--mono); font-size: .86rem; line-height: 1.55; min-height: 60vh; border-radius: var(--radius); padding: 1.1rem 1.2rem; }
+#prompt-view h1x { font-weight: 800; font-size: 1.05rem; color: var(--accent); }
+#prompt-view h2x { font-weight: 750; color: var(--accent-2); }
+[data-theme="light"] #prompt-view h2x { color: var(--accent); }
+#prompt-view bx { font-weight: 700; }
+.open-in { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .9rem; color: var(--muted); font-size: .9rem; }
+.score-ring { display: flex; align-items: center; gap: 1rem; }
+.ring { --p: 0; width: 74px; height: 74px; border-radius: 50%; flex: none; display: grid; place-items: center; font-weight: 800; font-size: 1.05rem;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--bg-4) 0); position: relative; }
+.ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--bg-2); }
+.ring span { position: relative; }
+.coverage { list-style: none; padding: 0; margin: .9rem 0 0; display: grid; gap: .35rem; }
+.coverage li { display: flex; align-items: center; gap: .55rem; font-size: .88rem; padding: .15rem .4rem; border-radius: 6px; }
+.coverage li .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coverage li .ic { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: .7rem; font-weight: 800; flex: none; }
+.coverage li.ok .ic { background: var(--ok-soft); color: var(--ok); }
+.coverage li.delegate .ic { background: var(--accent-soft); color: var(--accent); }
+.coverage li.skipped .ic { background: var(--bad-soft); color: var(--bad); }
+.coverage li.missing .ic { background: var(--bg-4); color: var(--faint); }
+.coverage li.missing, .coverage li.skipped { color: var(--muted); }
+.coverage li button { margin-left: auto; }
+.side-actions { display: grid; gap: .5rem; margin-top: 1rem; }
+.side-actions .btn { width: 100%; }
+.notice { padding: .7rem .9rem; border-radius: var(--radius-sm); font-size: .88rem; border: 1px solid var(--border); background: var(--bg-3); color: var(--muted); }
+.notice.warn { border-color: var(--warn); color: var(--text); background: var(--accent-soft); }
+.notice.ok { border-color: var(--ok); background: var(--ok-soft); color: var(--text); }
+.notice.bad { border-color: var(--bad); background: var(--bad-soft); color: var(--text); }
+
+/* ---------- Modal ---------- */
+.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 50; display: grid; place-items: center; padding: 1rem; animation: fade .18s ease; }
+.modal { width: min(640px, 100%); max-height: 92vh; overflow: auto; background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.4rem; }
+.modal h2 { display: flex; align-items: center; justify-content: space-between; }
+.field { margin-bottom: 1rem; }
+.field label { display: block; font-weight: 650; font-size: .9rem; margin-bottom: .35rem; }
+.field .help { color: var(--faint); font-size: .8rem; margin-top: .35rem; }
+.field-row { display: flex; gap: .5rem; align-items: center; }
+.field-row > * { flex: 1; }
+.field-row .btn { flex: none; }
+.seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .4rem; }
+.seg button { border: 1px solid var(--border-strong); background: var(--bg-3); padding: .55rem .6rem; border-radius: var(--radius-sm); font-weight: 600; font-size: .88rem; }
+.seg button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.switch { display: inline-flex; align-items: center; gap: .6rem; cursor: pointer; font-weight: 600; font-size: .9rem; }
+.switch input { width: auto; }
+.modal-foot { display: flex; justify-content: space-between; gap: .5rem; margin-top: 1.2rem; flex-wrap: wrap; }
+.modal-foot .right { display: flex; gap: .5rem; }
+
+/* ---------- Toast ---------- */
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0; z-index: 60;
+  background: var(--bg-4); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: .6rem 1.1rem; font-size: .9rem; font-weight: 600; box-shadow: var(--shadow); transition: .2s; max-width: min(92vw, 560px); text-align: center; }
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#toast.bad { border-color: var(--bad); }
+#toast.ok { border-color: var(--ok); }
+
+footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-top: 3rem; }
+@media print { .topbar, .col-side, .result-toolbar, .open-in, footer { display: none !important; } #prompt-view { max-height: none; border: 0; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="var(--bg-3)"/><path d="M32 10c6 8 12 12 12 22a12 12 0 0 1-24 0c0-5 2-8 4-11 0 5 2 7 4 8 0-9 2-14 4-19z" fill="var(--accent)"/></svg>
+    PromptForge <span class="tag">beta</span>
+  </div>
+  <nav class="steps" aria-label="Progress">
+    <div class="step active" data-step="1"><span class="n">1</span><span class="lbl">Describe</span></div>
+    <span class="sep">›</span>
+    <div class="step" data-step="2"><span class="n">2</span><span class="lbl">Refine</span></div>
+    <span class="sep">›</span>
+    <div class="step" data-step="3"><span class="n">3</span><span class="lbl">Your prompt</span></div>
+  </nav>
+  <div class="actions">
+    <button class="ai-badge" id="ai-badge" type="button" title="AI assistance settings"><span class="dot"></span><span id="ai-badge-text">AI: off</span></button>
+    <button class="btn icon ghost" id="theme-btn" type="button" title="Toggle light / dark" aria-label="Toggle light or dark theme">◐</button>
+    <button class="btn icon ghost" id="settings-btn" type="button" title="Settings" aria-label="Settings">⚙</button>
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- ================= SCREEN 1: DESCRIBE ================= -->
+  <section class="screen" id="screen-describe">
+    <div class="hero">
+      <h1>Tell me what you want to build.</h1>
+      <p>Write it the way you'd explain it to a friend — messy is fine. I'll ask about anything that's missing, then turn it into a detailed prompt an AI can actually build from.</p>
+    </div>
+    <div class="idea-box">
+      <label for="idea" class="sr-only">Describe your idea</label>
+      <textarea id="idea" placeholder="e.g. An app for my RC club where members can log flights, keep track of battery cycles, and see who's flying this weekend. It should work on phones and not need a login for viewing."></textarea>
+      <div class="examples" id="examples">
+        <span>Try an example:</span>
+      </div>
+      <div class="idea-foot">
+        <div class="depth" id="depth" role="group" aria-label="Interview depth">
+          <button type="button" data-depth="quick" class="on" title="Around 6–8 focused questions">Quick</button>
+          <button type="button" data-depth="thorough" title="Every question — best for bigger projects">Thorough</button>
+        </div>
+        <button class="btn primary lg" id="start-btn" type="button">Continue →</button>
+      </div>
+      <p class="tiny muted" style="text-align:right;margin-top:.5rem">Tip: <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to continue</p>
+    </div>
+    <div class="recent" id="recent">
+      <h3>Recent briefs <button class="btn ghost sm" id="clear-history" type="button">Clear</button></h3>
+      <div class="recent-list" id="recent-list"></div>
+    </div>
+  </section>
+
+  <!-- ================= SCREEN 2: REFINE ================= -->
+  <section class="screen two-col hidden" id="screen-refine">
+    <div class="col-main">
+      <div class="progress">
+        <div class="bar" aria-hidden="true"><i id="bar-fill"></i></div>
+        <div class="strength"><span id="strength-pct">0%</span> <small id="strength-label">rough</small></div>
+      </div>
+
+      <div class="card qcard" id="qcard">
+        <div class="q-meta"><span id="q-pos">Question 1</span><span id="q-ai" class="ai-mark hidden">✦ tailored by AI</span></div>
+        <h2 id="q-text" aria-live="polite">…</h2>
+        <p class="why" id="q-why"></p>
+        <div class="chips" id="q-chips"></div>
+        <label for="q-free" class="sr-only">Your answer</label>
+        <textarea id="q-free" class="q-free" placeholder="Add detail in your own words (optional)"></textarea>
+        <p class="q-hint" id="q-hint"></p>
+        <div class="q-actions">
+          <button class="btn ghost" id="q-back" type="button">← Back</button>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="q-skip" type="button" title="Leave this out of the prompt">Skip</button>
+          <button class="btn" id="q-delegate" type="button" title="Tell the AI to choose and explain its choice">Let the AI decide</button>
+          <button class="btn primary" id="q-next" type="button">Next →</button>
+        </div>
+      </div>
+
+      <div class="card thinking hidden" id="thinking"><div class="spin"></div><div id="thinking-text">Thinking about your idea…</div></div>
+
+      <div class="finish-row">
+        <button class="btn" id="finish-btn" type="button">I've said enough — build my prompt ✓</button>
+      </div>
+    </div>
+
+    <aside class="col-side">
+      <div class="card brief sticky">
+        <h3>Your brief so far <span class="count" id="brief-count"></span></h3>
+        <div class="brief-desc" id="brief-desc"></div>
+        <ul class="brief-list" id="brief-list"></ul>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ================= SCREEN 3: RESULT ================= -->
+  <section class="screen two-col hidden" id="screen-result">
+    <div class="col-main">
+      <div class="result-toolbar">
+        <div class="tabs" role="tablist">
+          <button type="button" id="tab-structured" class="on" role="tab">Structured</button>
+          <button type="button" id="tab-polished" role="tab" disabled title="Add an API key in Settings to enable">✦ AI-polished</button>
+        </div>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn sm" id="edit-btn" type="button">✎ Edit</button>
+        <button class="btn sm" id="download-btn" type="button">⤓ .md</button>
+        <button class="btn sm primary" id="copy-btn" type="button">Copy prompt</button>
+      </div>
+      <div class="notice hidden" id="result-notice"></div>
+      <div class="prompt-wrap">
+        <pre id="prompt-view" tabindex="0"></pre>
+        <textarea id="prompt-edit" class="hidden" spellcheck="false"></textarea>
+      </div>
+      <div class="open-in">
+        <span>Open in:</span>
+        <button class="btn sm" id="open-claude" type="button">Claude</button>
+        <button class="btn sm" id="open-chatgpt" type="button">ChatGPT</button>
+        <span class="tiny muted">(copies the prompt and opens the site — paste if it isn't pre-filled)</span>
+      </div>
+    </div>
+
+    <aside class="col-side">
+      <div class="card sticky">
+        <div class="score-ring">
+          <div class="ring" id="ring"><span id="ring-pct">0%</span></div>
+          <div>
+            <h3 style="margin:0">Brief strength</h3>
+            <div class="muted small" id="ring-label">rough</div>
+          </div>
+        </div>
+        <ul class="coverage" id="coverage"></ul>
+        <div class="side-actions">
+          <button class="btn" id="more-btn" type="button">Answer more questions</button>
+          <button class="btn" id="polish-btn" type="button">✦ Polish with AI</button>
+          <button class="btn ghost" id="restart-btn" type="button">Start a new brief</button>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <footer class="foot">PromptForge runs entirely in your browser. Nothing you type leaves this page unless you add an AI provider in Settings.</footer>
+</main>
+
+<!-- ================= SETTINGS MODAL ================= -->
+<div class="modal-back hidden" id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="modal">
+    <h2 id="settings-title">Settings <button class="btn icon ghost" id="settings-close" type="button" aria-label="Close">✕</button></h2>
+
+    <div class="field">
+      <label>AI assistance</label>
+      <div class="seg" id="provider-seg">
+        <button type="button" data-p="none">Off (built-in only)</button>
+        <button type="button" data-p="anthropic">Claude (Anthropic)</button>
+        <button type="button" data-p="openai">OpenAI</button>
+        <button type="button" data-p="custom">Custom / local</button>
+      </div>
+      <div class="help" id="provider-help">Built-in mode asks a fixed set of smart questions and assembles a structured prompt. Add a provider and the questions become tailored to your project and the final prompt gets an AI polish.</div>
+    </div>
+
+    <div id="provider-fields">
+      <div class="field" id="field-baseurl">
+        <label for="s-baseurl">API base URL (OpenAI-compatible)</label>
+        <input id="s-baseurl" type="url" placeholder="http://localhost:11434/v1">
+        <div class="help">Works with Ollama, LM Studio, OpenRouter, Groq and anything that speaks the OpenAI chat format. For Ollama, start it with <code>OLLAMA_ORIGINS=*</code> so the browser is allowed to call it.</div>
+      </div>
+      <div class="field" id="field-key">
+        <label for="s-key">API key</label>
+        <div class="field-row">
+          <input id="s-key" type="password" autocomplete="off" placeholder="sk-…">
+          <button class="btn sm" id="s-key-toggle" type="button">Show</button>
+        </div>
+        <div class="help">Stored only in this browser (localStorage) and sent only to the provider you chose. Don't use this on a shared computer.</div>
+      </div>
+      <div class="field">
+        <label for="s-model">Model</label>
+        <div class="field-row">
+          <input id="s-model" list="model-list" placeholder="model id">
+          <datalist id="model-list"></datalist>
+          <button class="btn sm" id="s-fetch-models" type="button">Fetch list</button>
+        </div>
+        <div class="help" id="model-help"></div>
+      </div>
+      <div class="field">
+        <label class="switch"><input type="checkbox" id="s-autopolish" checked> Automatically polish the final prompt with AI</label>
+      </div>
+      <div class="field">
+        <button class="btn sm" id="s-test" type="button">Test connection</button>
+        <span class="small muted" id="s-test-result"></span>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn danger sm" id="s-wipe" type="button">Clear all saved data</button>
+      <div class="right">
+        <button class="btn" id="settings-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="settings-save" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+/* ============================================================
+   PromptForge — single-file app
+   Sections:
+     1. Utilities
+     2. Settings & theme
+     3. Dimensions (the built-in interview: questions, detectors, options)
+     4. State & interview engine
+     5. Structured prompt builder
+     6. AI layer (optional: Claude / OpenAI / OpenAI-compatible)
+     7. UI rendering & events
+     8. History
+   ============================================================ */
+
+/* ---------- 1. Utilities ---------- */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const wordCount = (s) => (String(s || '').trim().match(/\S+/g) || []).length;
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+
+let toastTimer;
+function toast(msg, kind = '') {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.className = 'show ' + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3200);
+}
+
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
+  },
+  set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* storage may be unavailable (private mode) */ } },
+  del(key) { try { localStorage.removeItem(key); } catch { /* ignore */ } },
+};
+
+/** Split free text into a list: newlines, bullets, semicolons, or a comma-separated sentence. */
+function toList(text) {
+  if (!text) return [];
+  let lines = String(text).split(/\r?\n/).map((s) => s.replace(/^\s*(?:[-*•▪]|\d+[.)])\s*/, '').trim()).filter(Boolean);
+  if (lines.length === 1) {
+    const one = lines[0];
+    if (one.includes(';')) lines = one.split(';').map((s) => s.trim()).filter(Boolean);
+    else if ((one.match(/,/g) || []).length >= 2) lines = one.split(/,\s*(?:and\s+)?/).map((s) => s.trim()).filter(Boolean);
+  }
+  return lines;
+}
+
+/* ---------- 2. Settings & theme ---------- */
+const DEFAULT_MODELS = {
+  anthropic: ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001', 'claude-fable-5-1'],
+  openai: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-6-astra'],
+  custom: ['llama3.1', 'qwen2.5-coder', 'mistral'],
+};
+const settings = Object.assign(
+  { provider: 'none', apiKey: '', model: '', baseUrl: 'http://localhost:11434/v1', autoPolish: true, depth: 'quick' },
+  store.get('pf_settings', {})
+);
+function saveSettings() { store.set('pf_settings', settings); refreshAiBadge(); }
+function aiEnabled() {
+  if (settings.provider === 'none') return false;
+  if (settings.provider === 'custom') return !!settings.baseUrl;
+  return !!settings.apiKey;
+}
+function currentModel() {
+  return settings.model || (DEFAULT_MODELS[settings.provider] || [''])[0];
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  store.set('pf_theme', t);
+}
+(function initTheme() {
+  const saved = store.get('pf_theme', null);
+  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  applyTheme(saved || (prefersLight ? 'light' : 'dark'));
+})();
+
+/* ---------- 3. Dimensions ----------
+   Each dimension is one thing a good build prompt should cover.
+   - priority: essential | important | optional (drives question order and the "brief strength" score)
+   - detect(text, answers): pre-fill from the description so we don't ask what we already know
+   - when(state): whether the question applies right now (e.g. platform only once we know the type)
+   - options: chips (array, or a function of answers for dependent questions)
+   - delegate: wording used in the prompt when the user says "let the AI decide"
+------------------------------------------------------------- */
+const TYPE_PATTERNS = [
+  ['Mobile app', /\b(mobile app|android|ios\b|iphone|ipad|phone app|smartphone|apk|play store|app store|flutter|react native|kotlin|swiftui|xcode)\b/i],
+  ['Website', /\b(web ?site|landing page|home ?page|blog|portfolio site|static site|wordpress|squarespace|wix)\b/i],
+  ['Web app (runs in the browser)', /\b(web ?app|webapp|web-based|browser[- ]based|in (the|a) browser|saas|online tool|web dashboard|single[- ]page app|next\.?js|nuxt|svelte|angular)\b|\bReact\b|\bVue\b/i],
+  ['Desktop program', /\b(desktop|windows (app|program|application|tool|software)|mac ?os|linux (app|program)|\.exe\b|electron|tauri|pc (app|program|tool|application|software)|wpf|winforms|tkinter|pyqt|qt app)\b/i],
+  ['Command-line tool or script', /\b(script|cli\b|command[- ]line|terminal|bash|powershell|shell|cron job|batch file|automate|automation)\b/i],
+  ['Bot (Discord, Telegram, Slack…)', /\b(bot\b|discord|telegram|slack bot|twitch|chatbot|whatsapp)\b/i],
+  ['Browser extension', /\b(browser extension|chrome extension|firefox (add-?on|extension)|extension for (chrome|firefox|edge)|userscript|tampermonkey|greasemonkey)\b/i],
+  ['Game', /\b(game\b|unity|godot|unreal|pygame|platformer|roguelike|rpg\b|puzzle game)\b/i],
+  ['API or backend service', /\b(api\b|backend|back-end|rest(ful)? service|graphql|microservice|web ?service|webhook)\b/i],
+  ['Hardware / embedded', /\b(arduino|esp32|esp8266|raspberry pi|firmware|microcontroller|embedded|stm32|pcb|gpio|i2c|betaflight|rotorflight|edgetx|ethos)\b/i],
+  ['Spreadsheet or office automation', /\b(excel|spreadsheet|google sheets|vba|macro\b|office add-?in)\b/i],
+];
+const NOT_SURE_TYPE = 'Not sure — recommend one';
+
+const PLATFORM_OPTIONS = {
+  'Mobile app': ['Android', 'iPhone / iOS', 'Both Android and iOS'],
+  'Desktop program': ['Windows', 'Mac', 'Linux', 'All of them'],
+  'Website': ['Desktop browsers', 'Phones too (responsive)', 'Needs to look great everywhere'],
+  'Web app (runs in the browser)': ['Desktop browsers', 'Phones too (responsive)', 'Installable like an app (PWA)'],
+  'Command-line tool or script': ['Windows', 'Mac', 'Linux', 'Any'],
+  'Bot (Discord, Telegram, Slack…)': ['Discord', 'Telegram', 'Slack', 'WhatsApp', 'Twitch', 'Other (say which)'],
+  'Browser extension': ['Chrome / Edge', 'Firefox', 'Safari', 'All of them'],
+  'Game': ['PC', 'Web browser', 'Mobile', 'Console'],
+  'API or backend service': ['Cloud-hosted', 'Self-hosted / home server', 'Serverless', 'Not sure'],
+  'Hardware / embedded': ['Arduino', 'ESP32 / ESP8266', 'Raspberry Pi', 'Other board (say which)'],
+  'Spreadsheet or office automation': ['Excel', 'Google Sheets', 'LibreOffice'],
+};
+
+const STACK_PATTERNS = [
+  ['Python', /\bpython\b/i], ['JavaScript', /\bjavascript\b|\bjs\b/i], ['TypeScript', /\btypescript\b/i],
+  ['Kotlin', /\bkotlin\b/i], ['Swift', /\bswift(ui)?\b/i], ['Java', /\bjava\b/i], ['C#/.NET', /\bc#|\bcsharp\b|\.net\b/i],
+  ['Rust', /\brust\b/i], ['C/C++', /\bc\+\+|\bc language\b/i], ['Lua', /\blua\b/i], ['PHP', /\bphp\b/i], ['Ruby', /\bruby\b/i],
+  ['Flutter', /\bflutter\b/i], ['React', /\bReact\b/], ['React Native', /\breact native\b/i], ['Vue', /\bVue\b/], ['Svelte', /\bsvelte\b/i],
+  ['Angular', /\bangular\b/i], ['Next.js', /\bnext\.?js\b/i], ['Node.js', /\bnode\.?js\b/i], ['Django', /\bdjango\b/i], ['Flask', /\bflask\b/i],
+  ['FastAPI', /\bfastapi\b/i], ['Express', /\bexpress(\.js| server| app| backend| api)\b/i], ['Laravel', /\blaravel\b/i],
+  ['Electron', /\belectron\b/i], ['Tauri', /\btauri\b/i], ['Unity', /\bunity\b/i], ['Godot', /\bgodot\b/i],
+  ['SQLite', /\bsqlite\b/i], ['PostgreSQL', /\bpostgres(ql)?\b/i], ['MySQL', /\bmysql\b/i], ['MongoDB', /\bmongo(db)?\b/i],
+  ['Firebase', /\bfirebase\b/i], ['Supabase', /\bsupabase\b/i], ['Tailwind', /\btailwind\b/i], ['Arduino', /\barduino\b/i], ['WebView', /\bwebview\b/i],
+];
+
+const INTEGRATION_RE = /\b(apis?\b|google (maps|calendar|drive|sheets|photos)|calendar|spotify|youtube|twitter|instagram|facebook|discord|telegram|slack|stripe|paypal|payments?|email|sms|twilio|push notifications?|notifications?|weather|gps|location|camera|bluetooth|ble\b|usb|serial port|nfc|qr codes?|barcodes?|openai|chatgpt|claude|llm|webhooks?|zapier|ifttt|home assistant|mqtt|smart home|printer|scanner|github|strava|fitbit|garmin)\b/gi;
+const DESIGN_RE = /\b(dark mode|dark theme|light theme|minimal(ist)?|clean (look|design|ui|interface)|modern (look|design|ui|interface)|material design|colou?rful|playful|professional (look|design)|look and feel|looks? like|similar to|brand colou?rs?|retro|neon|glassmorphism|cartoon(y)?|pixel art)\b/gi;
+const CONSTRAINT_RE = /\b(offline|no internet|without internet|free (to run|tier|hosting)|no paid|zero cost|low budget|cheap(ly)?|deadline|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|end of \w+)|privacy|private|gdpr|hipaa|accessib\w*|screen reader|lightweight|low[- ]power|battery(-| )friendly|must not|can'?t use|cannot use|no (ads|tracking|accounts?|login)|open[- ]source|self[- ]hosted|no cloud)\b/gi;
+const NICE_RE = /\b(nice to have|would be (nice|cool|great|awesome)|eventually|later on|in the future|down the (road|line)|bonus|optionally|if possible|stretch goal|phase 2|v2\b|version 2)\b/i;
+const PURPOSE_RE = /\b(so (that )?(i|we|users|they|people|members|customers)|because|to help|helps?\b|problem|instead of|frustrat\w*|tired of|easier|faster|save (me |us )?time|keep track|track|manage|organi[sz]e|goal|purpose|the idea is|the point is)\b/i;
+
+function uniqMatches(text, re) {
+  const seen = new Set();
+  const out = [];
+  for (const m of String(text).matchAll(re)) { const k = m[0].toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(m[0]); } }
+  return out;
+}
+function typeOf(answers) {
+  const a = answers.projectType;
+  return a && a.choices && a.choices[0] ? a.choices[0] : null;
+}
+
+const DIMS = [
+  {
+    id: 'projectType', label: 'Type', priority: 'essential', type: 'single',
+    question: 'What form should this take?',
+    why: 'This decides the tools, the platform, and half of the other questions.',
+    options: [...Object.keys(PLATFORM_OPTIONS), NOT_SURE_TYPE],
+    detect(text) {
+      const hits = TYPE_PATTERNS.filter(([, re]) => re.test(text)).map(([label]) => label);
+      if (hits.length === 1) return { choices: [hits[0]], note: 'from your description' };
+      if (hits.length > 1) return { hint: 'Your description could be: ' + hits.join(' · ') + '. Pick the main one.' };
+      return null;
+    },
+    delegate: "I'm not sure what form this should take. Recommend the most practical option for this idea (web app, mobile app, desktop program, script, etc.) and explain your reasoning in a couple of sentences before building.",
+  },
+  {
+    id: 'platform', label: 'Platform', priority: 'essential', type: 'multi',
+    question: 'Where does it need to run?',
+    why: 'The AI will pick very different tools depending on the answer.',
+    when: (s) => { const t = typeOf(s.answers); return !!(t && PLATFORM_OPTIONS[t]); },
+    options: (answers) => PLATFORM_OPTIONS[typeOf(answers)] || [],
+    detect(text, answers) {
+      const t = typeOf(answers);
+      const has = (re) => re.test(text);
+      if (t === 'Mobile app') {
+        const a = has(/\bandroid\b/i), i = has(/\b(ios|iphone|ipad)\b/i);
+        if (a && i) return { choices: ['Both Android and iOS'], note: 'from your description' };
+        if (a) return { choices: ['Android'], note: 'from your description' };
+        if (i) return { choices: ['iPhone / iOS'], note: 'from your description' };
+      }
+      if (t === 'Desktop program') {
+        const c = []; if (has(/\bwindows\b/i)) c.push('Windows'); if (has(/\bmac(os)?\b/i)) c.push('Mac'); if (has(/\blinux\b/i)) c.push('Linux');
+        if (c.length === 3) return { choices: ['All of them'], note: 'from your description' };
+        if (c.length) return { choices: c, note: 'from your description' };
+      }
+      if (t === 'Bot (Discord, Telegram, Slack…)') {
+        for (const p of ['Discord', 'Telegram', 'Slack', 'WhatsApp', 'Twitch']) if (has(new RegExp('\\b' + p + '\\b', 'i'))) return { choices: [p], note: 'from your description' };
+      }
+      if (t === 'Browser extension') {
+        if (has(/\bchrome\b|\bedge\b/i)) return { choices: ['Chrome / Edge'], note: 'from your description' };
+        if (has(/\bfirefox\b/i)) return { choices: ['Firefox'], note: 'from your description' };
+        if (has(/\bsafari\b/i)) return { choices: ['Safari'], note: 'from your description' };
+      }
+      if (t === 'Hardware / embedded') {
+        if (has(/\barduino\b/i)) return { choices: ['Arduino'], note: 'from your description' };
+        if (has(/\besp(32|8266)\b/i)) return { choices: ['ESP32 / ESP8266'], note: 'from your description' };
+        if (has(/\braspberry pi\b/i)) return { choices: ['Raspberry Pi'], note: 'from your description' };
+      }
+      if (t === 'Spreadsheet or office automation') {
+        if (has(/\bexcel\b/i)) return { choices: ['Excel'], note: 'from your description' };
+        if (has(/\bgoogle sheets\b/i)) return { choices: ['Google Sheets'], note: 'from your description' };
+      }
+      return null;
+    },
+    delegate: 'Choose the platform(s) that make the most sense for this and tell me why.',
+  },
+  {
+    id: 'purpose', label: 'Goal', priority: 'essential', type: 'text', big: true,
+    question: "What's the main problem this solves, or the main thing it should help someone do?",
+    why: "The clearer the goal, the better the AI's decisions on everything you didn't spell out.",
+    placeholder: 'e.g. Right now I keep flight notes in a paper notebook and never know which batteries are getting old.',
+    when: (s) => wordCount(s.description) < 45 || !PURPOSE_RE.test(s.description),
+  },
+  {
+    id: 'users', label: 'Who it\'s for', priority: 'essential', type: 'single',
+    question: "Who's going to use this?",
+    why: 'A tool for yourself can cut corners a public app can\'t.',
+    options: ['Just me', 'Friends or family', 'A club, group or community', 'My team or coworkers', 'Customers or the public', 'Not sure yet'],
+    detect(text) {
+      const hits = [];
+      if (/\b(for (myself|me|my own|personal use)|just (for )?me\b|personal (use|project|tool)|my own use)\b/i.test(text)) hits.push('Just me');
+      if (/\b(my (team|coworkers|co-workers|colleagues|company|business|employees|staff|shop|office|department)|internal tool|at work)\b/i.test(text)) hits.push('My team or coworkers');
+      if (/\b(customers|clients|the public|anyone can|general public|patients|visitors|subscribers)\b/i.test(text)) hits.push('Customers or the public');
+      if (/\b(club|community|guild|league|association|members)\b/i.test(text)) hits.push('A club, group or community');
+      if (/\b(friends|family|my (wife|husband|partner|kids|children|son|daughter|roommates?))\b/i.test(text)) hits.push('Friends or family');
+      if (hits.length === 1) return { choices: [hits[0]], note: 'from your description' };
+      if (hits.length > 1) return { hint: 'Sounds like: ' + hits.join(' · ') + '. Pick the main audience.' };
+      return null;
+    },
+    delegate: "Assume a small, friendly audience unless the description suggests otherwise, and tell me what you assumed.",
+  },
+  {
+    id: 'coreFeatures', label: 'Must-have features', priority: 'essential', type: 'text', big: true,
+    question: 'What must the first version be able to do?',
+    why: "List the essentials, one per line. This becomes the AI's checklist — anything not here is optional.",
+    placeholder: 'e.g.\nLog a flight with date, model and duration\nShow total flights per model\nExport everything to CSV',
+    hint: 'Include things you already mentioned if you want them guaranteed. Details help: what does the user see, click, or get?',
+  },
+  {
+    id: 'data', label: 'Data & accounts', priority: 'important', type: 'single',
+    question: 'Does it need to remember anything between uses?',
+    why: 'Saving data — and where — is one of the biggest design decisions.',
+    options: ['Nothing needs to be saved', 'Save on the device only', 'Save online with user accounts / sync', 'Not sure — recommend something'],
+    placeholder: 'e.g. Each user has their own data; they should be able to log in from a phone and a laptop.',
+    detect(text) {
+      const negated = /\b(no|without|not require|doesn'?t need|don'?t need|no need for|never)\s+(an?\s+)?(login|log in|sign ?in|sign ?up|accounts?)\b/i.test(text);
+      if (/\b(login|log in|sign ?in|sign ?up|accounts?\b|user profiles?|sync(ing|ed)? (across|between)|cloud|firebase|supabase|multi-?user|leaderboard)\b/i.test(text)) {
+        if (negated) return { hint: 'You mentioned login or accounts — what exactly is needed, and for whom?' };
+        return { choices: ['Save online with user accounts / sync'], note: 'from your description' };
+      }
+      if (/\b(nothing (needs to be )?saved|no (need to )?(save|storage|database)|stateless)\b/i.test(text)) return { choices: ['Nothing needs to be saved'], note: 'from your description' };
+      if (/\b(save|saved|store|stored|remember|history|offline|locally|sqlite|on the device|persist|database)\b/i.test(text)) return { hint: 'You mentioned saving data — where should it live?' };
+      return null;
+    },
+    delegate: "I'm not sure what's best for storing data. Choose a sensible, simple approach for this kind of project, explain it in a sentence or two, and avoid anything that needs a paid service unless it's really necessary.",
+  },
+  {
+    id: 'techStack', label: 'Technology', priority: 'important', type: 'multi', exclusive: 'No preference — pick the best fit',
+    question: 'Any preference on programming language or tools?',
+    why: "If you don't care, say so — the AI will pick something mainstream and well documented.",
+    options: ['No preference — pick the best fit', 'Python', 'JavaScript / TypeScript', 'Kotlin / Android', 'Swift / iOS', 'C# / .NET', 'Java', 'Rust', 'C / C++', 'Lua', 'Other (say which)'],
+    placeholder: 'e.g. It has to match my existing Kotlin app, or: I want to learn Python so use that.',
+    detect(text) {
+      const hits = STACK_PATTERNS.filter(([, re]) => re.test(text)).map(([l]) => l);
+      if (hits.length) return { choices: [], text: 'Mentioned: ' + hits.join(', '), note: 'from your description' };
+      return null;
+    },
+    delegate: 'No strong preference. Choose the most appropriate mainstream, well-documented stack for this kind of project and explain your choice in a short paragraph.',
+  },
+  {
+    id: 'deliverable', label: 'What you want back', priority: 'important', type: 'single',
+    question: 'What do you want the AI to give you?',
+    why: 'Sets expectations for the first reply.',
+    options: ['Complete, working code', 'A build plan first, then the code', 'A single file I can run right away', 'Just the plan / architecture', 'Build it step by step and explain as you go'],
+    detect(text) {
+      if (/\b(single file|one file|one html file)\b/i.test(text)) return { choices: ['A single file I can run right away'], note: 'from your description' };
+      if (/\b(step[- ]by[- ]step|walk me through|explain (as you go|everything))\b/i.test(text)) return { choices: ['Build it step by step and explain as you go'], note: 'from your description' };
+      if (/\b(just (the |a )?plan|architecture only|no code yet)\b/i.test(text)) return { choices: ['Just the plan / architecture'], note: 'from your description' };
+      return null;
+    },
+    delegate: 'Start with a short plan, then build the complete thing.',
+  },
+  {
+    id: 'skillLevel', label: 'Your experience', priority: 'important', type: 'single',
+    question: 'How comfortable are you with code?',
+    why: 'Changes how much the AI explains and how it hands things over.',
+    options: ['Beginner — explain things simply', 'Some experience — I can follow along', 'Experienced developer — skip the basics'],
+    detect(text) {
+      if (/\b(i'?m (a )?(complete )?(beginner|newbie)|new to (coding|programming)|not a (programmer|developer|coder)|non-?technical|no coding experience|never coded|don'?t know how to code|can'?t code)\b/i.test(text)) return { choices: ['Beginner — explain things simply'], note: 'from your description' };
+      if (/\b(i'?m (an? )?(experienced|senior|professional) (developer|programmer|engineer)|i'?m a (developer|programmer|software engineer|dev)\b|years of experience)\b/i.test(text)) return { choices: ['Experienced developer — skip the basics'], note: 'from your description' };
+      return null;
+    },
+    delegate: 'Assume I have some experience but explain anything unusual.',
+  },
+  {
+    id: 'startingPoint', label: 'Starting point', priority: 'important', type: 'single',
+    question: 'Are we starting from scratch, or building on something that exists?',
+    why: "Existing code changes everything — the AI needs to know what it's working with.",
+    options: ['From scratch', 'Adding to an existing project (describe below)', 'Rewriting or porting something (describe below)'],
+    placeholder: 'e.g. Existing Android app in Kotlin, about 5k lines, uses Room for storage. Repo: github.com/…',
+    detect(text) {
+      if (/\b(rewrite|rewriting|port(ing)? (it|this|my|our)|migrat(e|ing)|convert(ing)? (my|our|an existing))\b/i.test(text)) return { choices: ['Rewriting or porting something (describe below)'], note: 'from your description' };
+      if (/\b(existing (app|project|code|codebase|site|website|system)|already (have|built|wrote|made)|my current (app|project|code|site)|add(ing)? (this |a feature |features )?to (my|our|an existing)|legacy|refactor|extend(ing)? my|upgrade my)\b/i.test(text)) return { choices: ['Adding to an existing project (describe below)'], note: 'from your description' };
+      if (/\b(from scratch|brand new|new project|start(ing)? fresh|greenfield)\b/i.test(text)) return { choices: ['From scratch'], note: 'from your description' };
+      return null;
+    },
+    delegate: 'Assume this is a brand-new project.',
+  },
+  {
+    id: 'constraints', label: 'Constraints', priority: 'important', type: 'multi', exclusive: 'None I can think of',
+    question: 'Any hard requirements or limitations?',
+    why: 'Things like "must work offline" or "no paid services" are cheap to say now and expensive to discover later.',
+    options: ['Must work offline', 'Must be free to run (no paid services)', 'Keep data private / local', 'Fast and lightweight', 'Accessibility matters', 'Has a deadline (say when)', 'None I can think of'],
+    placeholder: 'e.g. Has to run on an old laptop; needs to be done before the club meet on the 20th.',
+    detect(text) {
+      const hits = uniqMatches(text, CONSTRAINT_RE);
+      if (hits.length) return { choices: [], text: 'From the description: ' + hits.join(', '), note: 'from your description' };
+      return null;
+    },
+    delegate: 'No special constraints; use sensible defaults and keep it simple to run.',
+  },
+  {
+    id: 'design', label: 'Look & feel', priority: 'important', type: 'multi', exclusive: "Function over form — don't care much",
+    question: 'How should it look and feel?',
+    why: 'Even a rough steer ("clean, dark, big buttons") saves a lot of back-and-forth.',
+    options: ['Clean and minimal', 'Modern and polished', 'Fun and colorful', 'Dark mode', 'Big, simple controls', 'Match an existing app or brand (describe)', "Function over form — don't care much"],
+    placeholder: 'e.g. Like the Google Fit app: card-based, lots of white space, one accent color.',
+    detect(text) {
+      const hits = uniqMatches(text, DESIGN_RE);
+      if (hits.length) return { choices: [], text: 'From the description: ' + hits.join(', '), note: 'from your description' };
+      return null;
+    },
+    delegate: 'Use a clean, modern, uncluttered look with sensible defaults; I care more about it working well than about looks.',
+  },
+  {
+    id: 'integrations', label: 'Connections', priority: 'optional', type: 'single',
+    question: 'Does it need to talk to any outside services, devices, or data sources?',
+    why: 'APIs, hardware, payments, email, maps — each one is a chunk of work worth naming.',
+    options: ['No', 'Yes (describe below)', 'Not sure'],
+    placeholder: 'e.g. Pull weather from an API; read from a USB serial port; send a Discord message.',
+    detect(text, answers) {
+      let hits = uniqMatches(text, INTEGRATION_RE);
+      const t = typeOf(answers);
+      if (t && /bot/i.test(t)) hits = hits.filter((h) => !['discord', 'telegram', 'slack', 'whatsapp', 'twitch'].includes(h.toLowerCase())); // the chat platform itself isn't an integration
+      if (hits.length) return { choices: [], text: 'From the description: ' + hits.join(', '), note: 'from your description' };
+      return null;
+    },
+    delegate: 'Keep external dependencies to a minimum; if something is clearly needed, choose a free, well-known option and tell me.',
+  },
+  {
+    id: 'niceToHave', label: 'Nice to have', priority: 'optional', type: 'text', big: true,
+    question: "Anything that would be nice, but isn't essential for the first version?",
+    why: 'Separating these keeps the first version small and finishable.',
+    placeholder: 'e.g. Charts of battery health over time; dark mode; share a flight log as an image.',
+    detect(text) { return NICE_RE.test(text) ? { choices: [], text: 'Mentioned in the description.', note: 'from your description' } : null; },
+  },
+  {
+    id: 'successCriteria', label: 'Definition of done', priority: 'optional', type: 'text',
+    question: "How will you know the first version is done? What's the one thing it must do well?",
+    why: 'Gives the AI a finish line instead of an open-ended task.',
+    placeholder: 'e.g. I can log a flight in under 10 seconds on my phone and see my battery history.',
+  },
+  {
+    id: 'outOfScope', label: 'Out of scope', priority: 'optional', type: 'text',
+    question: "Anything the AI should NOT do or include?",
+    why: 'Stops well-meaning extras: no accounts, no ads, no frameworks you dislike, etc.',
+    placeholder: 'e.g. No user accounts; no third-party tracking; don\'t build a settings screen yet.',
+  },
+  {
+    id: 'name', label: 'Name', priority: 'optional', type: 'text',
+    question: 'Does the project have a name?',
+    why: 'Optional — but a name makes the prompt (and the code) read better.',
+    placeholder: 'e.g. FlightLog',
+    detect(text) {
+      const m = text.match(/\b(?:called|named|name (?:is|will be)|titled)\s+["“']?([A-Za-z][\w-]*(?:\s+[A-Z][\w-]*){0,3})["”']?/);
+      if (m) return { choices: [], text: m[1].trim(), note: 'from your description' };
+      return null;
+    },
+  },
+];
+const DIM_BY_ID = Object.fromEntries(DIMS.map((d) => [d.id, d]));
+const PRIORITY_WEIGHT = { essential: 3, important: 2, optional: 1 };
+const QUICK_LIMIT = 8;
+
+/* ---------- 4. State & interview engine ---------- */
+const state = {
+  id: null,
+  screen: 'describe',
+  description: '',
+  depth: settings.depth || 'quick',
+  answers: {},        // dimId -> { choices:[], text:'', source:'user'|'detected'|'delegate'|'skipped', note?, via?, q? }
+  extraQA: [],        // AI questions that didn't map onto a dimension: { q, a }
+  asked: [],          // question ids in the order they were asked (dims and ai_* ids)
+  current: null,      // id of the question on screen
+  aiQuestions: [],    // { id, question, why, options, allowMultiple, covers, answer? }
+  aiRound: 0,
+  aiMode: false,
+  single: false,      // answering one specific question from the result screen
+  prompt: { structured: '', polished: '', view: 'structured', edited: false },
+};
+
+function resetState() {
+  Object.assign(state, {
+    id: uid(), screen: 'describe', description: '', answers: {}, extraQA: [], asked: [], current: null,
+    aiQuestions: [], aiRound: 0, aiMode: false, single: false,
+    prompt: { structured: '', polished: '', view: 'structured', edited: false },
+  });
+}
+
+/** Chip labels carry instructions like "(describe below)" — strip those when quoting an answer. */
+const cleanChoice = (c) => String(c).replace(/\s*\((describe( below)?|say which|optional)\)\s*/i, '').trim();
+function answerText(a) {
+  if (!a) return '';
+  const parts = [];
+  if (a.choices && a.choices.length) parts.push(a.choices.map(cleanChoice).join(', '));
+  if (a.text && a.text.trim()) parts.push(a.text.trim());
+  return parts.join(' — ');
+}
+function hasContent(a) { return !!(a && (a.source === 'delegate' || (a.choices && a.choices.length) || (a.text && a.text.trim()))); }
+function dimStatus(id) {
+  const a = state.answers[id];
+  if (!a) return 'missing';
+  if (a.source === 'skipped') return 'skipped';
+  if (a.source === 'delegate') return 'delegate';
+  return hasContent(a) ? (a.source === 'detected' ? 'detected' : 'answered') : 'missing';
+}
+
+/** Run every detector that can run right now against the description (never overwrites user answers). */
+function runDetection() {
+  const text = state.description;
+  for (const d of DIMS) {
+    if (state.answers[d.id] && state.answers[d.id].source !== 'detected') continue;
+    if (d.when && !d.when(state)) { if (state.answers[d.id] && state.answers[d.id].source === 'detected') delete state.answers[d.id]; continue; }
+    if (!d.detect) continue;
+    const r = d.detect(text, state.answers);
+    if (r && (r.choices || r.text)) {
+      state.answers[d.id] = { choices: r.choices || [], text: r.text || '', source: 'detected', note: r.note || '' };
+    } else if (state.answers[d.id] && state.answers[d.id].source === 'detected') {
+      delete state.answers[d.id];
+    }
+  }
+}
+function detectHint(d) {
+  if (!d.detect) return '';
+  const r = d.detect(state.description, state.answers);
+  return r && r.hint ? r.hint : '';
+}
+
+/** Dimensions still worth asking, in priority order, respecting depth. */
+function pendingDims() {
+  const order = { essential: 0, important: 1, optional: 2 };
+  let list = DIMS.filter((d) => {
+    if (state.asked.includes(d.id)) return false;
+    if (state.answers[d.id] && state.answers[d.id].source !== 'skipped' && hasContent(state.answers[d.id])) return false;
+    if (state.answers[d.id] && state.answers[d.id].source === 'skipped') return false;
+    if (d.when && !d.when(state)) return false;
+    return true;
+  }).sort((a, b) => order[a.priority] - order[b.priority]);
+  if (state.depth === 'quick' && !state.single) {
+    list = list.filter((d) => d.priority !== 'optional');
+    const askedDims = state.asked.filter((id) => DIM_BY_ID[id]).length;
+    list = list.slice(0, Math.max(0, QUICK_LIMIT - askedDims));
+  }
+  return list;
+}
+function pendingAi() { return state.aiQuestions.filter((q) => !state.asked.includes(q.id)); }
+
+function nextQuestionId() {
+  if (state.aiMode) {
+    const ai = pendingAi();
+    if (ai.length) return ai[0].id;
+    return null; // engine will decide whether to fetch another round
+  }
+  const p = pendingDims();
+  return p.length ? p[0].id : null;
+}
+function questionById(id) {
+  if (DIM_BY_ID[id]) return { kind: 'dim', ...DIM_BY_ID[id] };
+  const q = state.aiQuestions.find((x) => x.id === id);
+  if (!q) return null;
+  return {
+    kind: 'ai', id: q.id, label: q.label || q.question, question: q.question, why: q.why || '',
+    type: q.allowMultiple ? 'multi' : 'single', options: q.options || [], covers: q.covers || 'other', big: !(q.options && q.options.length),
+  };
+}
+function getAnswerFor(id) {
+  if (DIM_BY_ID[id]) return state.answers[id];
+  const q = state.aiQuestions.find((x) => x.id === id);
+  return q ? q.answer : undefined;
+}
+
+/** Store an answer for the current question, then re-run detectors (a chosen type may unlock the platform question). */
+function commitAnswer(id, answer) {
+  const q = questionById(id);
+  if (!q) return;
+  if (q.kind === 'dim') {
+    state.answers[id] = answer;
+  } else {
+    const aq = state.aiQuestions.find((x) => x.id === id);
+    aq.answer = answer;
+    // Map the answer onto a dimension when the AI told us which one it covers.
+    if (aq.covers && DIM_BY_ID[aq.covers]) {
+      if (answer.source === 'skipped') {
+        if (!state.answers[aq.covers] || state.answers[aq.covers].source === 'detected') { /* keep whatever we detected */ }
+      } else {
+        state.answers[aq.covers] = { ...answer, via: 'ai', q: aq.question };
+      }
+    } else if (answer.source !== 'skipped') {
+      const idx = state.extraQA.findIndex((x) => x.id === id);
+      const entry = { id, q: aq.question, a: answer.source === 'delegate' ? '(let the AI decide)' : answerText(answer) };
+      if (idx >= 0) state.extraQA[idx] = entry; else state.extraQA.push(entry);
+    }
+  }
+  if (!state.asked.includes(id)) state.asked.push(id);
+  runDetection();
+}
+
+/** Brief strength: weighted coverage of the dimensions (delegating counts as partial credit). */
+function strength() {
+  let got = 0, total = 0;
+  for (const d of DIMS) {
+    if (d.when && !d.when(state) && !state.answers[d.id]) continue; // not applicable
+    const w = PRIORITY_WEIGHT[d.priority];
+    total += w;
+    const s = dimStatus(d.id);
+    if (s === 'answered' || s === 'detected') got += w;
+    else if (s === 'delegate') got += w * 0.6;
+  }
+  let pct = total ? (got / total) * 100 : 0;
+  pct += Math.min(15, state.extraQA.length * 5);
+  pct = Math.max(0, Math.min(100, Math.round(pct)));
+  const label = pct < 35 ? 'rough' : pct < 60 ? 'decent' : pct < 88 ? 'solid' : 'excellent';
+  return { pct, label };
+}
+/* ---------- 5. Structured prompt builder ---------- */
+const val = (id) => (hasContent(state.answers[id]) && state.answers[id].source !== 'delegate') ? answerText(state.answers[id]) : '';
+const delegated = (id) => dimStatus(id) === 'delegate';
+const delegateLine = (id) => DIM_BY_ID[id].delegate || 'Use your best judgment here and tell me what you chose.';
+const section = (title, body) => (body && String(body).trim() ? `## ${title}\n${String(body).trim()}\n\n` : '');
+const has = (s, re) => re.test(s || '');
+
+function deriveTitle() {
+  const n = val('name');
+  if (n) return n;
+  const first = state.description.trim().split(/(?<=[.!?])\s+/)[0] || 'My project';
+  let t = first.replace(/^(i want|i'd like|i would like|i need|please|help me|can you|could you)\s+(to\s+)?(build|make|create|have|write|develop)?\s*(me\s+)?(an?|the|my)?\s*/i, '').trim();
+  t = t.replace(/^(build|make|create|write|develop)\s+(me\s+)?(an?|the|my)?\s*/i, '').replace(/^(an?|the)\s+/i, '').replace(/[.!?]+$/, '');
+  if (t.length > 70) t = t.slice(0, 67).replace(/\s+\S*$/, '') + '…';
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : 'My project';
+}
+function currentTitle() { return deriveTitle(); }
+
+const AUDIENCE_NOTES = [
+  [/just me/i, "It's a personal tool: prioritize getting it working over polish, but keep the code easy for me to change later."],
+  [/friends|family/i, "A small, friendly audience — it should be easy to use without instructions, but it doesn't need to scale."],
+  [/club|group|community/i, 'A group of people with mixed technical skills will use it, so it should be self-explanatory and forgiving of mistakes.'],
+  [/team|coworkers|colleagues|work/i, "It's used at work by my team, so it should be reliable, straightforward, and easy to hand over to someone else."],
+  [/customers|public|clients/i, 'Strangers will use it, so it must be robust, handle errors gracefully, protect user data, and be usable without instructions.'],
+  [/not sure/i, 'Design it to start simple but so it could be opened up to more people later.'],
+];
+function audienceNote(users) { const hit = AUDIENCE_NOTES.find(([re]) => re.test(users)); return hit ? ' ' + hit[1] : ''; }
+
+function dataBody() {
+  if (delegated('data')) return delegateLine('data');
+  const a = state.answers.data; if (!hasContent(a)) return '';
+  const c = (a.choices || []).join(' ');
+  let s = '';
+  if (/nothing/i.test(c)) s = 'Nothing needs to persist between sessions — keep it stateless and simple.';
+  else if (/device only|locally|local/i.test(c)) s = 'Data is saved locally on the device — no accounts and no server. Choose a simple, reliable local storage method and make sure data survives restarts and updates.';
+  else if (/online|accounts?|sync|cloud/i.test(c)) s = 'Data is saved online with user accounts so it can be used from more than one device. Keep sign-in simple and secure, and tell me which backend or service you would use and why.';
+  else if (/not sure|recommend/i.test(c)) s = delegateLine('data');
+  else if (c) s = c + '.';
+  if (a.text && a.text.trim()) s += (s ? ' ' : '') + a.text.trim();
+  return s;
+}
+function deliverableBody() {
+  if (delegated('deliverable')) return delegateLine('deliverable');
+  const t = val('deliverable'); if (!t) return '';
+  if (has(t, /single file/i)) return 'A single self-contained file I can open or run immediately, with no build step if at all possible.';
+  if (has(t, /plan first|then the code/i)) return 'First, a short build plan (architecture, files, order of work). Once I confirm it, the complete code.';
+  if (has(t, /just the plan|architecture/i)) return 'A plan and architecture only — no code yet. Describe the components, the data model, the key decisions, and the order you would build things in.';
+  if (has(t, /step by step|explain as you go/i)) return 'Build it in small steps. After each step, explain what you did and how I can check that it works before we move on.';
+  if (has(t, /complete|working code/i)) return 'Complete, working code for everything in the must-have list, organized into files as appropriate, plus any setup steps.';
+  return t;
+}
+function skillBody() {
+  const t = delegated('skillLevel') ? '' : val('skillLevel');
+  if (delegated('skillLevel')) return delegateLine('skillLevel');
+  if (!t) return '';
+  if (has(t, /beginner|new|novice|non-?technical|not a (programmer|developer)|no experience/i)) return "I'm new to programming. Explain what you're doing in plain language, define any jargon, and give exact step-by-step instructions for installing, running, and testing. Prefer simple, well-known tools over clever ones.";
+  if (has(t, /experienced|expert|senior|professional|skip the basics|developer/i)) return "I'm an experienced developer. Skip the basics and focus on architecture decisions, trade-offs, and clean, idiomatic code.";
+  return "I can read and modify code but I'm not an expert. Explain the key decisions briefly and point out anything I'll need to set up or configure myself." + (has(t, /some experience|follow along/i) ? '' : ` (${t})`);
+}
+function startingBody() {
+  if (delegated('startingPoint')) return delegateLine('startingPoint');
+  const a = state.answers.startingPoint; if (!hasContent(a)) return '';
+  const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
+  if (/scratch/i.test(c)) return 'This is a brand-new project.' + (extra ? ' ' + extra : '');
+  if (/existing/i.test(c)) return "I'm adding to an existing project: " + (extra || "I'll share the relevant code — ask me for whatever you need to see before changing anything.");
+  if (/rewrit|port/i.test(c)) return 'This is a rewrite or port of something that already exists: ' + (extra || "I'll share the existing version — keep its behavior unless I say otherwise.");
+  return answerText(a);
+}
+function integrationsBody() {
+  if (delegated('integrations')) return delegateLine('integrations');
+  const a = state.answers.integrations; if (!hasContent(a)) return '';
+  const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
+  if (/^no$/i.test(c.trim()) && !extra) return 'None — keep it self-contained.';
+  if (/not sure/i.test(c)) return delegateLine('integrations') + (extra ? ' ' + extra : '');
+  if (/^yes/i.test(c.trim()) && !extra) return 'Yes — ask me which services or devices are involved before you design around them.';
+  return extra || answerText(a);
+}
+function constraintsBody() {
+  if (delegated('constraints')) return delegateLine('constraints');
+  const a = state.answers.constraints; if (!hasContent(a)) return '';
+  const items = (a.choices || []).filter((c) => !/none i can think of/i.test(c));
+  if (a.text && a.text.trim()) items.push(a.text.trim());
+  if (!items.length) return "No special constraints beyond what's above.";
+  return items.map((i) => `- ${i}`).join('\n');
+}
+function designBody() {
+  if (delegated('design')) return delegateLine('design');
+  const a = state.answers.design; if (!hasContent(a)) return '';
+  const c = (a.choices || []).filter((x) => !/function over form/i.test(x));
+  const extra = (a.text || '').trim();
+  if (!c.length && !extra) return "I care more about it working well than about looks. Keep it clean and uncluttered; don't spend effort on visual flourishes.";
+  let s = c.length ? c.join(', ') + '.' : '';
+  if (extra) s += (s ? ' ' : '') + extra;
+  return s;
+}
+function typeLines() {
+  const lines = [];
+  if (delegated('projectType')) lines.push(`- **Type:** ${delegateLine('projectType')}`);
+  else if (val('projectType')) lines.push(`- **Type:** ${val('projectType')}`);
+  if (delegated('platform')) lines.push(`- **Platform:** ${delegateLine('platform')}`);
+  else if (val('platform')) lines.push(`- **Platform:** ${val('platform')}`);
+  const sp = startingBody(); if (sp) lines.push(`- **Starting point:** ${sp}`);
+  return lines.join('\n');
+}
+function unspecifiedDims() {
+  return DIMS.filter((d) => {
+    if (d.when && !d.when(state)) return false;
+    if (['name', 'niceToHave', 'outOfScope', 'successCriteria', 'purpose'].includes(d.id)) return false;
+    const s = dimStatus(d.id);
+    return s === 'missing' || s === 'skipped';
+  });
+}
+
+function buildStructuredPrompt() {
+  const title = deriveTitle();
+  let out = `# Build request: ${title}\n\n`;
+
+  let what = state.description.trim();
+  const purpose = val('purpose');
+  if (purpose) what += `\n\nThe main goal: ${purpose}`;
+  out += section('What I want to build', what);
+
+  if (delegated('users')) out += section("Who it's for", delegateLine('users'));
+  else if (val('users')) out += section("Who it's for", val('users') + '.' + audienceNote(val('users')));
+
+  out += section('Type and platform', typeLines());
+
+  const feats = toList(val('coreFeatures'));
+  const fbody = feats.length
+    ? feats.map((f, i) => `${i + 1}. ${f}`).join('\n') + '\n\nThis list is the checklist for version 1. Nothing else is required until all of these work.'
+    : "I haven't listed the features separately — work from the description above. Before you build anything, write out the must-have features you believe are required as a numbered list and confirm them with me.";
+  out += section('Must-have features (version 1)', fbody);
+
+  const nice = toList(val('niceToHave'));
+  if (nice.length) out += section('Nice to have (only after the must-haves work)', nice.map((n) => `- ${n}`).join('\n'));
+
+  out += section('Data and accounts', dataBody());
+  out += section('Connections to other services or devices', integrationsBody());
+
+  if (delegated('techStack')) out += section('Technology', delegateLine('techStack'));
+  else if (val('techStack')) {
+    const a = state.answers.techStack;
+    const choices = (a.choices || []).filter((c) => !/no preference|other \(say which\)/i.test(c));
+    const extra = (a.text || '').trim();
+    let s = '';
+    if ((a.choices || []).some((c) => /no preference/i.test(c)) && !choices.length) s = delegateLine('techStack');
+    else if (choices.length) s = `Please use: ${choices.join(', ')}.`;
+    if (extra) s += (s ? ' ' : '') + extra;
+    out += section('Technology', s);
+  }
+
+  out += section('Look and feel', designBody());
+  out += section('Requirements and constraints', constraintsBody());
+
+  const oos = toList(val('outOfScope'));
+  if (oos.length) out += section('Out of scope (please do not build these)', oos.map((o) => `- ${o}`).join('\n'));
+
+  out += section('What I want from you', deliverableBody());
+  if (val('successCriteria')) out += section("How I'll know it's done", val('successCriteria'));
+
+  if (state.extraQA.length) out += section('Additional details', state.extraQA.map((x) => `**${x.q}**\n${x.a}`).join('\n\n'));
+
+  const unspec = unspecifiedDims();
+  if (unspec.length) out += section("Things I didn't specify", `I haven't decided on: ${unspec.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result.`);
+
+  const rules = [];
+  const skill = skillBody(); if (skill) rules.push(skill);
+  rules.push("Before you write any code, restate your understanding of this project in a few sentences and list the assumptions you're making. If something is unclear and would significantly change the outcome, ask me — otherwise make a reasonable choice and tell me what you chose.");
+  rules.push('Build the must-have features first and get them working end to end before touching anything optional.');
+  rules.push('Keep the code organized and commented so it can be maintained later.');
+  rules.push("When you're done, tell me exactly how to run it and how to test that each must-have feature works.");
+  rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
+  out += section('How to work with me', rules.map((r) => `- ${r}`).join('\n'));
+
+  return out.trim() + '\n';
+}
+
+/* ---------- 6. AI layer (optional) ---------- */
+const QUESTION_SYSTEM = `You are an expert software consultant. A person is describing something they want an AI coding assistant to build. Your job is to work out what is missing from their brief and ask the follow-up questions that matter most, so the final prompt leaves nothing important to guesswork.
+
+You will receive: their description, what is already known, what is still unknown, and any earlier Q&A.
+
+Guidelines:
+- Ask only about things that are genuinely unknown AND would change what gets built. Never re-ask something already stated or answered.
+- Be specific to THIS project. "Which Discord events should the bot react to?" beats "What features do you want?".
+- Plain, friendly language. One topic per question. No jargon unless the person used it first.
+- Give 2–5 short quick-pick options when sensible. When the person may not know, include an option like "Not sure — you decide".
+- Priority: what it is and who it is for → must-have features and how they behave → data and accounts → connections to other services → platform and technology → look and feel → constraints → what to deliver and the person's experience level.
+- Most important first. If the brief is already complete enough for a strong build prompt, return an empty list.
+- "covers" must be one of the dimension ids listed under STILL UNKNOWN when the question is about that topic, otherwise "other".
+
+Return ONLY JSON, no prose, exactly in this shape:
+{"questions":[{"id":"short_snake_case","label":"2-3 word topic","question":"…","why":"one short sentence on why this matters","options":["…"],"allowMultiple":false,"covers":"dimension_id or other"}]}`;
+
+const POLISH_SYSTEM = `You write outstanding prompts for AI coding assistants (Claude, ChatGPT, Cursor, Claude Code, Copilot and similar). You will receive a person's rough project description, their answers to follow-up questions, and a structured draft prompt. Rewrite it into the best possible build prompt.
+
+Rules:
+- Write in the first person, as the person speaking to the AI that will build the project.
+- Keep every fact, preference and constraint they gave. Do not invent features, integrations or requirements they did not ask for. Where they said "not sure" or "let the AI decide", explicitly hand that decision to the AI and ask it to state its choice.
+- Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
+- Use this structure, skipping a section only when there is truly nothing for it: title; overview (what, why, who); type and platform; must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; starting point; what to deliver; success criteria; open questions; how to work with me (experience level, restate understanding and list assumptions before coding, build must-haves first, explain how to run and test, push back on bad ideas).
+- Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
+- Output only the prompt, in Markdown.`;
+
+async function parseResponse(r) {
+  const text = await r.text();
+  let j = null; try { j = JSON.parse(text); } catch { /* not json */ }
+  if (!r.ok) {
+    const msg = (j && j.error && (j.error.message || j.error)) || (j && j.message) || text.slice(0, 200) || r.statusText;
+    throw new Error(`${r.status} ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
+  }
+  if (!j) throw new Error('The API returned something that is not JSON.');
+  return j;
+}
+function networkError(e) {
+  if (e instanceof TypeError) return new Error("couldn't reach the API (network, CORS, or a wrong URL)");
+  return e;
+}
+const API = {
+  anthropicHeaders() {
+    return { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  },
+  openaiBase() { return settings.provider === 'openai' ? 'https://api.openai.com/v1' : String(settings.baseUrl || '').replace(/\/+$/, ''); },
+  openaiHeaders() { const h = { 'Content-Type': 'application/json' }; if (settings.apiKey) h.Authorization = 'Bearer ' + settings.apiKey; return h; },
+  async chat({ system, user, maxTokens = 2500 }) {
+    let r;
+    try {
+      if (settings.provider === 'anthropic') {
+        r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST', headers: this.anthropicHeaders(),
+          body: JSON.stringify({ model: currentModel(), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
+        });
+        const j = await parseResponse(r);
+        return (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+      }
+      r = await fetch(this.openaiBase() + '/chat/completions', {
+        method: 'POST', headers: this.openaiHeaders(),
+        body: JSON.stringify({ model: currentModel(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      });
+      const j = await parseResponse(r);
+      const content = j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : '';
+      return Array.isArray(content) ? content.map((c) => c.text || '').join('') : String(content || '');
+    } catch (e) { throw networkError(e); }
+  },
+  async models() {
+    try {
+      let r, j;
+      if (settings.provider === 'anthropic') {
+        r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: this.anthropicHeaders() });
+        j = await parseResponse(r);
+      } else {
+        r = await fetch(this.openaiBase() + '/models', { headers: this.openaiHeaders() });
+        j = await parseResponse(r);
+      }
+      const ids = (j.data || j.models || []).map((m) => m.id || m.name || m.model).filter(Boolean);
+      return ids.sort((a, b) => (/gpt|claude|o\d/i.test(b) - /gpt|claude|o\d/i.test(a)) || a.localeCompare(b));
+    } catch (e) { throw networkError(e); }
+  },
+};
+function extractJSON(s) {
+  let t = String(s).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a >= 0 && b > a) t = t.slice(a, b + 1);
+  return JSON.parse(t);
+}
+function cleanMarkdown(s) {
+  let t = String(s).trim();
+  const m = t.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
+  if (m) t = m[1].trim();
+  return t + '\n';
+}
+function maxRounds() { return state.depth === 'quick' ? 2 : 3; }
+function shortLabel(q) { return String(q).replace(/[?.!]/g, '').split(/\s+/).slice(0, 4).join(' '); }
+
+function knownSummary() {
+  const lines = [];
+  for (const d of DIMS) {
+    const s = dimStatus(d.id);
+    if (s === 'answered' || s === 'detected') lines.push(`- ${d.label} (${d.id}): ${answerText(state.answers[d.id])}`);
+    else if (s === 'delegate') lines.push(`- ${d.label} (${d.id}): (the person said: let the AI decide)`);
+    else if (s === 'skipped') lines.push(`- ${d.label} (${d.id}): (the person chose to skip this — do not ask again)`);
+  }
+  return lines;
+}
+function unknownSummary() {
+  return DIMS.filter((d) => !state.answers[d.id] && !(d.when && !d.when(state))).map((d) => `- ${d.id}: ${d.label} — "${d.question}"`);
+}
+function qaSummary() {
+  return state.aiQuestions.filter((q) => q.answer).map((q) => {
+    const a = q.answer;
+    const txt = a.source === 'skipped' ? '(skipped)' : a.source === 'delegate' ? '(let the AI decide)' : answerText(a);
+    return `Q: ${q.question}\nA: ${txt}`;
+  });
+}
+async function aiFetchQuestions() {
+  const perRound = state.depth === 'quick' ? 4 : 5;
+  const user = `PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
+  const raw = await API.chat({ system: QUESTION_SYSTEM, user, maxTokens: 1500 });
+  const j = extractJSON(raw);
+  const qs = Array.isArray(j.questions) ? j.questions : [];
+  return qs.filter((q) => q && q.question).slice(0, 6).map((q, i) => ({
+    id: `ai_${state.aiRound + 1}_${i + 1}`,
+    question: String(q.question).trim(),
+    why: q.why ? String(q.why).trim() : '',
+    options: Array.isArray(q.options) ? q.options.map((o) => String(o).trim()).filter(Boolean).slice(0, 6) : [],
+    allowMultiple: !!q.allowMultiple,
+    covers: DIM_BY_ID[q.covers] ? q.covers : 'other',
+    label: q.label ? String(q.label).trim() : (DIM_BY_ID[q.covers] ? DIM_BY_ID[q.covers].label : shortLabel(q.question)),
+  }));
+}
+function polishUserMessage() {
+  const lines = [];
+  for (const d of DIMS) {
+    const s = dimStatus(d.id);
+    if (s === 'answered' || s === 'detected') lines.push(`${d.label}: ${answerText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
+    else if (s === 'delegate') lines.push(`${d.label}: let the AI decide`);
+  }
+  for (const x of state.extraQA) lines.push(`${x.q}: ${x.a}`);
+  return `PROJECT DESCRIPTION (the person's own words):\n${state.description}\n\nANSWERS TO FOLLOW-UP QUESTIONS:\n${lines.join('\n') || '(none)'}\n\nSTRUCTURED DRAFT PROMPT:\n${state.prompt.structured}`;
+}
+
+/* ---------- 7. UI rendering & events ---------- */
+function showScreen(name) {
+  state.screen = name;
+  for (const s of ['describe', 'refine', 'result']) $('#screen-' + s).classList.toggle('hidden', s !== name);
+  const idx = { describe: 1, refine: 2, result: 3 }[name];
+  $$('.steps .step').forEach((el) => {
+    const n = +el.dataset.step;
+    el.classList.toggle('active', n === idx);
+    el.classList.toggle('done', n < idx);
+  });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function refreshAiBadge() {
+  const on = aiEnabled();
+  const b = $('#ai-badge');
+  b.classList.toggle('on', on);
+  const names = { anthropic: 'Claude', openai: 'OpenAI', custom: 'custom' };
+  $('#ai-badge-text').textContent = on ? `AI: ${names[settings.provider] || 'on'}` : 'AI: off';
+}
+
+/* --- Refine screen --- */
+function renderProgress() {
+  const s = strength();
+  $('#bar-fill').style.width = s.pct + '%';
+  $('#strength-pct').textContent = s.pct + '%';
+  $('#strength-label').textContent = s.label;
+}
+function renderBrief() {
+  const desc = state.description.trim();
+  $('#brief-desc').textContent = desc.length > 360 ? desc.slice(0, 357) + '…' : desc;
+  const items = [];
+  for (const d of DIMS) {
+    const a = state.answers[d.id]; if (!a) continue;
+    const s = dimStatus(d.id); if (s === 'missing') continue;
+    let v = '', cls = '';
+    if (s === 'delegate') { v = 'Let the AI decide'; cls = 'faint'; }
+    else if (s === 'skipped') { v = 'Skipped'; cls = 'faint'; }
+    else v = answerText(a);
+    const pill = s === 'detected' ? '<span class="pill detected">detected</span>' : s === 'delegate' ? '<span class="pill delegate">AI decides</span>' : s === 'skipped' ? '<span class="pill skipped">skipped</span>' : a.via === 'ai' ? '<span class="pill ai">✦</span>' : '';
+    items.push(`<li class="brief-item"><div class="k"><span>${esc(d.label)}</span>${pill}</div><div class="v ${cls}">${esc(v)}</div></li>`);
+  }
+  for (const x of state.extraQA) items.push(`<li class="brief-item"><div class="k"><span>${esc(x.q)}</span><span class="pill ai">✦</span></div><div class="v">${esc(x.a)}</div></li>`);
+  $('#brief-list').innerHTML = items.join('') || '<li class="brief-empty">Answers will appear here as you go.</li>';
+  const n = items.length; $('#brief-count').textContent = n ? `${n} item${n === 1 ? '' : 's'}` : '';
+  renderProgress();
+}
+function showThinking(text) { $('#thinking-text').textContent = text; $('#thinking').classList.remove('hidden'); $('#qcard').classList.add('hidden'); $('#finish-btn').disabled = true; }
+function hideThinking() { $('#thinking').classList.add('hidden'); $('#qcard').classList.remove('hidden'); $('#finish-btn').disabled = false; }
+
+function showQuestion(id) {
+  const q = questionById(id); if (!q) return;
+  state.current = id;
+  const existing = getAnswerFor(id);
+  const opts = typeof q.options === 'function' ? q.options(state.answers) : (q.options || []);
+
+  const askedIdx = state.asked.indexOf(id);
+  const num = askedIdx >= 0 ? askedIdx + 1 : state.asked.length + 1;
+  if (state.single) $('#q-pos').textContent = 'One more thing';
+  else if (state.aiMode) $('#q-pos').textContent = `Question ${num}`;
+  else { const remaining = pendingDims().filter((d) => d.id !== id).length; $('#q-pos').textContent = `Question ${num} of ~${Math.max(num, state.asked.length + remaining + (askedIdx >= 0 ? 0 : 1))}`; }
+  $('#q-ai').classList.toggle('hidden', q.kind !== 'ai');
+  $('#q-text').textContent = q.question;
+  $('#q-why').textContent = q.why || '';
+  $('#q-why').classList.toggle('hidden', !q.why);
+
+  const chips = $('#q-chips');
+  chips.innerHTML = opts.map((o) => `<button type="button" class="chip" data-v="${esc(o)}">${esc(o)}</button>`).join('');
+  chips.classList.toggle('hidden', !opts.length);
+  const sel = existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.choices || []) : [];
+  $$('.chip', chips).forEach((c) => { if (sel.includes(c.dataset.v)) c.classList.add('selected'); });
+
+  const free = $('#q-free');
+  free.value = existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.text || '') : '';
+  free.placeholder = q.placeholder || (opts.length ? 'Add detail in your own words (optional)' : 'Type your answer…');
+  free.classList.toggle('big', !!q.big);
+  const hint = q.hint || (q.kind === 'dim' ? detectHint(q) : '');
+  $('#q-hint').textContent = hint; $('#q-hint').classList.toggle('hidden', !hint);
+
+  $('#q-back').classList.toggle('hidden', state.single || (askedIdx <= 0 && !(askedIdx === -1 && state.asked.length)));
+  $('#q-delegate').classList.toggle('hidden', q.kind === 'dim' && !q.delegate);
+  $('#finish-btn').textContent = state.single ? '← Back to my prompt' : "I've said enough — build my prompt ✓";
+  hideThinking();
+  renderBrief();
+  if (!opts.length) setTimeout(() => free.focus(), 50); else chips.querySelector('.chip') && setTimeout(() => free.blur(), 0);
+}
+function readAnswer() {
+  const q = questionById(state.current);
+  const choices = $$('#q-chips .chip.selected').map((c) => c.dataset.v);
+  const text = $('#q-free').value.trim();
+  return { q, answer: { choices, text, source: 'user' } };
+}
+async function advance() {
+  if (state.single) { state.single = false; await buildResult(); return; }
+  const i = state.asked.indexOf(state.current);
+  if (i >= 0 && i < state.asked.length - 1) { showQuestion(state.asked[i + 1]); return; } // walking forward after "Back"
+  let id = nextQuestionId();
+  if (!id && state.aiMode && state.aiRound < maxRounds()) {
+    showThinking(state.aiRound === 0 ? 'Reading your idea and working out what to ask…' : 'Checking whether anything important is still missing…');
+    try {
+      const qs = await aiFetchQuestions();
+      state.aiRound++;
+      state.aiQuestions.push(...qs);
+      if (!qs.length && state.aiRound === 1) toast('The AI thinks your description already covers the essentials.');
+    } catch (e) {
+      console.warn('AI question round failed:', e);
+      toast(`AI unavailable — ${e.message}. Using built-in questions.`, 'bad');
+      state.aiMode = false;
+    }
+    hideThinking();
+    id = nextQuestionId();
+  }
+  if (id) { showQuestion(id); return; }
+  await buildResult();
+}
+function onNext() {
+  const { q, answer } = readAnswer();
+  if (!answer.choices.length && !answer.text) { toast(q.type === 'text' ? 'Type an answer, or use Skip / Let the AI decide' : 'Pick an option, type something, or skip'); return; }
+  commitAnswer(state.current, answer);
+  state.prompt.polished = '';
+  advance();
+}
+function onSkip() { commitAnswer(state.current, { choices: [], text: '', source: 'skipped' }); state.prompt.polished = ''; advance(); }
+function onDelegate() { commitAnswer(state.current, { choices: [], text: '', source: 'delegate' }); state.prompt.polished = ''; advance(); }
+function onBack() {
+  const i = state.asked.indexOf(state.current);
+  const prev = i > 0 ? state.asked[i - 1] : (i === -1 && state.asked.length ? state.asked[state.asked.length - 1] : null);
+  if (prev) showQuestion(prev);
+}
+function onChipClick(e) {
+  const chip = e.target.closest('.chip'); if (!chip) return;
+  const q = questionById(state.current); if (!q) return;
+  const chips = $$('#q-chips .chip');
+  if (q.type === 'multi') {
+    const isExclusive = q.exclusive && chip.dataset.v === q.exclusive;
+    if (isExclusive) { chips.forEach((c) => c.classList.remove('selected')); chip.classList.add('selected'); }
+    else { chip.classList.toggle('selected'); if (q.exclusive) chips.forEach((c) => { if (c.dataset.v === q.exclusive) c.classList.remove('selected'); }); }
+  } else {
+    const was = chip.classList.contains('selected');
+    chips.forEach((c) => c.classList.remove('selected'));
+    if (!was) chip.classList.add('selected');
+  }
+}
+async function startInterview() {
+  const text = $('#idea').value.trim();
+  if (wordCount(text) < 3) { toast('Give me at least a sentence to work with'); $('#idea').focus(); return; }
+  resetState();
+  state.description = text;
+  state.depth = settings.depth || 'quick';
+  state.aiMode = aiEnabled();
+  runDetection();
+  showScreen('refine');
+  renderBrief();
+  await advance();
+}
+function askSingle(id) {
+  state.single = true; state.aiMode = false;
+  showScreen('refine');
+  showQuestion(id);
+}
+async function answerMore() {
+  state.aiMode = false; state.depth = 'thorough'; state.single = false;
+  if (!pendingDims().length) { toast("You've answered everything — nice."); return; }
+  showScreen('refine');
+  await advance();
+}
+
+/* --- Result screen --- */
+function highlightMd(text) {
+  return esc(text).split('\n').map((line) => {
+    if (/^# /.test(line)) return `<h1x>${line}</h1x>`;
+    if (/^#{2,3} /.test(line)) return `<h2x>${line}</h2x>`;
+    return line.replace(/\*\*(.+?)\*\*/g, '<bx>**$1**</bx>');
+  }).join('\n');
+}
+function currentPromptText() {
+  if (!$('#prompt-edit').classList.contains('hidden')) return $('#prompt-edit').value;
+  const p = state.prompt;
+  return p.view === 'polished' && p.polished ? p.polished : p.structured;
+}
+async function buildResult() {
+  state.prompt.structured = buildStructuredPrompt();
+  if (!state.prompt.polished) state.prompt.view = 'structured';
+  showScreen('result');
+  renderResult();
+  saveHistory();
+  if (aiEnabled() && settings.autoPolish && !state.prompt.polished) polish();
+}
+function renderResult() {
+  const p = state.prompt;
+  const text = p.view === 'polished' && p.polished ? p.polished : p.structured;
+  $('#prompt-view').innerHTML = highlightMd(text);
+  $('#prompt-edit').value = text;
+  $('#prompt-view').classList.remove('hidden'); $('#prompt-edit').classList.add('hidden'); $('#edit-btn').textContent = '✎ Edit';
+  $('#tab-structured').classList.toggle('on', p.view !== 'polished' || !p.polished);
+  $('#tab-polished').classList.toggle('on', p.view === 'polished' && !!p.polished);
+  $('#tab-polished').disabled = !p.polished;
+  $('#tab-polished').title = p.polished ? '' : (aiEnabled() ? 'Click "Polish with AI" to generate' : 'Add an AI provider in Settings to enable');
+  $('#polish-btn').classList.toggle('hidden', false);
+  $('#polish-btn').textContent = p.polished ? '✦ Polish again' : '✦ Polish with AI';
+
+  const notice = $('#result-notice');
+  if (!aiEnabled()) { notice.className = 'notice'; notice.innerHTML = 'Built-in mode. Add a Claude, OpenAI, or local model in <button class="btn sm ghost" type="button" data-open-settings style="display:inline-flex;padding:.1rem .5rem">Settings ⚙</button> for questions tailored to your project and an AI-polished final prompt.'; }
+  else notice.className = 'notice hidden';
+
+  const s = strength();
+  $('#ring').style.setProperty('--p', s.pct); $('#ring-pct').textContent = s.pct + '%'; $('#ring-label').textContent = s.label;
+  const cov = [];
+  for (const d of DIMS) {
+    if (d.when && !d.when(state) && !state.answers[d.id]) continue;
+    const st = dimStatus(d.id);
+    const cls = st === 'answered' || st === 'detected' ? 'ok' : st;
+    const icon = cls === 'ok' ? '✓' : st === 'delegate' ? '≈' : st === 'skipped' ? '–' : '○';
+    const v = st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
+    cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(d.label)}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${cls === 'ok' ? 'edit' : 'answer'}</button></li>`);
+  }
+  $('#coverage').innerHTML = cov.join('');
+}
+function setPolishing(on) {
+  const b = $('#polish-btn');
+  b.disabled = on; b.innerHTML = on ? '<span class="spin"></span> Polishing…' : (state.prompt.polished ? '✦ Polish again' : '✦ Polish with AI');
+  $('#tab-polished').disabled = on || !state.prompt.polished;
+}
+async function polish() {
+  if (!aiEnabled()) { openSettings(); return; }
+  if (!state.prompt.structured) state.prompt.structured = buildStructuredPrompt();
+  setPolishing(true);
+  try {
+    const raw = await API.chat({ system: POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 4000 });
+    if (!raw.trim()) throw new Error('empty response');
+    state.prompt.polished = cleanMarkdown(raw);
+    state.prompt.view = 'polished';
+    renderResult(); saveHistory();
+    toast('Polished with AI ✦', 'ok');
+  } catch (e) {
+    console.warn('Polish failed:', e);
+    toast('Polish failed — ' + e.message, 'bad');
+  } finally { setPolishing(false); }
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch {
+    try { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); return true; }
+    catch { return false; }
+  }
+}
+function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'prompt'; }
+function downloadPrompt() {
+  const text = currentPromptText();
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = slug(currentTitle()) + '-prompt.md';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+async function openIn(site) {
+  const text = currentPromptText();
+  const ok = await copyText(text);
+  const enc = encodeURIComponent(text);
+  const base = site === 'claude' ? 'https://claude.ai/new' : 'https://chatgpt.com/';
+  const url = enc.length < 6000 ? `${base}?q=${enc}` : base;
+  toast(ok ? 'Prompt copied — paste it if the page is not pre-filled' : 'Opening… copy the prompt manually if needed');
+  window.open(url, '_blank', 'noopener');
+}
+function toggleEdit() {
+  const view = $('#prompt-view'), ed = $('#prompt-edit'), btn = $('#edit-btn');
+  if (ed.classList.contains('hidden')) { ed.value = currentPromptText(); ed.classList.remove('hidden'); view.classList.add('hidden'); btn.textContent = '✓ Done'; ed.focus(); }
+  else {
+    const t = ed.value;
+    if (state.prompt.view === 'polished' && state.prompt.polished) state.prompt.polished = t; else state.prompt.structured = t;
+    state.prompt.edited = true;
+    ed.classList.add('hidden'); view.classList.remove('hidden'); view.innerHTML = highlightMd(t); btn.textContent = '✎ Edit';
+    saveHistory();
+  }
+}
+
+/* ---------- 8. History ---------- */
+function saveHistory() {
+  if (!state.id) state.id = uid();
+  const list = store.get('pf_history', []);
+  const entry = {
+    id: state.id, ts: Date.now(), title: currentTitle(), description: state.description, answers: state.answers, extraQA: state.extraQA,
+    asked: state.asked, aiQuestions: state.aiQuestions, prompt: state.prompt, strength: strength().pct, depth: state.depth,
+  };
+  const i = list.findIndex((x) => x.id === state.id);
+  if (i >= 0) list[i] = entry; else list.unshift(entry);
+  store.set('pf_history', list.slice(0, 20));
+  renderRecent();
+}
+function loadHistory(id) {
+  const e = store.get('pf_history', []).find((x) => x.id === id); if (!e) return;
+  resetState();
+  Object.assign(state, {
+    id: e.id, description: e.description || '', answers: e.answers || {}, extraQA: e.extraQA || [], asked: e.asked || [], aiQuestions: e.aiQuestions || [],
+    depth: e.depth || 'quick', prompt: Object.assign({ structured: '', polished: '', view: 'structured', edited: false }, e.prompt || {}),
+  });
+  if (!state.prompt.structured) state.prompt.structured = buildStructuredPrompt();
+  showScreen('result'); renderResult();
+}
+function renderRecent() {
+  const list = store.get('pf_history', []);
+  $('#recent').classList.toggle('hidden', !list.length);
+  $('#recent-list').innerHTML = list.map((e) => `
+    <div class="recent-item">
+      <div class="t"><b>${esc(e.title || 'Untitled')}</b><span>${new Date(e.ts).toLocaleString()} · ${e.strength || 0}% ${e.prompt && e.prompt.polished ? '· ✦ polished' : ''}</span></div>
+      <button class="btn sm" type="button" data-load="${e.id}">Open</button>
+      <button class="btn icon ghost sm" type="button" data-del="${e.id}" aria-label="Delete">✕</button>
+    </div>`).join('');
+}
+function deleteHistory(id) { store.set('pf_history', store.get('pf_history', []).filter((x) => x.id !== id)); renderRecent(); }
+
+/* --- Settings modal --- */
+const draft = {};
+function openSettings() {
+  Object.assign(draft, settings);
+  $('#settings-modal').classList.remove('hidden');
+  renderSettings();
+  $('#s-test-result').textContent = '';
+}
+function closeSettings() { $('#settings-modal').classList.add('hidden'); }
+function renderSettings() {
+  $$('#provider-seg button').forEach((b) => b.classList.toggle('on', b.dataset.p === draft.provider));
+  const p = draft.provider;
+  $('#provider-fields').classList.toggle('hidden', p === 'none');
+  $('#field-baseurl').classList.toggle('hidden', p !== 'custom');
+  $('#field-key').classList.toggle('hidden', p === 'none');
+  $('#s-baseurl').value = draft.baseUrl || '';
+  $('#s-key').value = draft.apiKey || '';
+  $('#s-model').value = draft.model || '';
+  $('#s-model').placeholder = (DEFAULT_MODELS[p] || [''])[0] || 'model id';
+  $('#model-list').innerHTML = (DEFAULT_MODELS[p] || []).map((m) => `<option value="${esc(m)}">`).join('');
+  $('#s-autopolish').checked = draft.autoPolish !== false;
+  $('#model-help').textContent = p === 'anthropic' ? 'Leave blank to use ' + DEFAULT_MODELS.anthropic[0] + '. "Fetch list" pulls the current models from your account.'
+    : p === 'openai' ? 'Leave blank to use ' + DEFAULT_MODELS.openai[0] + '. "Fetch list" pulls the current models from your account.'
+    : p === 'custom' ? 'The model name your server expects (e.g. the name you pulled in Ollama).' : '';
+  $('#provider-help').textContent = p === 'none'
+    ? 'Built-in mode asks a fixed set of smart questions and assembles a structured prompt. Add a provider and the questions become tailored to your project and the final prompt gets an AI polish.'
+    : p === 'anthropic' ? 'Uses the Claude API directly from this page. Get a key at console.anthropic.com. Typical cost per brief: a fraction of a cent.'
+    : p === 'openai' ? 'Uses the OpenAI API directly from this page. Get a key at platform.openai.com.'
+    : 'Any OpenAI-compatible server: Ollama, LM Studio, OpenRouter, Groq, etc.';
+}
+function readSettingsForm() {
+  draft.baseUrl = $('#s-baseurl').value.trim();
+  draft.apiKey = $('#s-key').value.trim();
+  draft.model = $('#s-model').value.trim();
+  draft.autoPolish = $('#s-autopolish').checked;
+}
+async function withTempSettings(fn) {
+  readSettingsForm();
+  const backup = { ...settings };
+  Object.assign(settings, draft);
+  try { return await fn(); } finally { Object.assign(settings, backup); }
+}
+function wipeAll() {
+  ['pf_settings', 'pf_history', 'pf_theme'].forEach((k) => store.del(k));
+  location.reload();
+}
+
+/* --- Wiring --- */
+const EXAMPLES = [
+  'A simple Android app for my RC club where members log flights and track battery cycles. No login needed to view.',
+  'A Discord bot that posts the weather for our field every morning and lets people say if they are flying.',
+  'A little desktop program that watches a folder and renames my 3D printer files by date and model.',
+];
+function init() {
+  refreshAiBadge();
+  renderRecent();
+  $('#examples').insertAdjacentHTML('beforeend', EXAMPLES.map((e) => `<button type="button" class="chip example" data-ex="${esc(e)}">${esc(e.split(' ').slice(0, 7).join(' '))}…</button>`).join(''));
+  $$('#depth button').forEach((b) => b.classList.toggle('on', b.dataset.depth === (settings.depth || 'quick')));
+
+  $('#start-btn').addEventListener('click', startInterview);
+  $('#idea').addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') startInterview(); });
+  $('#examples').addEventListener('click', (e) => { const b = e.target.closest('[data-ex]'); if (b) { $('#idea').value = b.dataset.ex; $('#idea').focus(); } });
+  $('#depth').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; settings.depth = b.dataset.depth; saveSettings(); $$('#depth button').forEach((x) => x.classList.toggle('on', x === b)); });
+  $('#recent-list').addEventListener('click', (e) => { const l = e.target.closest('[data-load]'); if (l) return loadHistory(l.dataset.load); const d = e.target.closest('[data-del]'); if (d) deleteHistory(d.dataset.del); });
+  $('#clear-history').addEventListener('click', () => { store.del('pf_history'); renderRecent(); });
+
+  $('#q-chips').addEventListener('click', onChipClick);
+  $('#q-next').addEventListener('click', onNext);
+  $('#q-skip').addEventListener('click', onSkip);
+  $('#q-delegate').addEventListener('click', onDelegate);
+  $('#q-back').addEventListener('click', onBack);
+  $('#q-free').addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') onNext(); });
+  $('#finish-btn').addEventListener('click', async () => { if (state.single) { state.single = false; } await buildResult(); });
+
+  $('#tab-structured').addEventListener('click', () => { state.prompt.view = 'structured'; renderResult(); });
+  $('#tab-polished').addEventListener('click', () => { if (state.prompt.polished) { state.prompt.view = 'polished'; renderResult(); } });
+  $('#copy-btn').addEventListener('click', async () => { toast((await copyText(currentPromptText())) ? 'Prompt copied to clipboard' : 'Copy failed — select the text and copy manually', 'ok'); });
+  $('#download-btn').addEventListener('click', downloadPrompt);
+  $('#edit-btn').addEventListener('click', toggleEdit);
+  $('#open-claude').addEventListener('click', () => openIn('claude'));
+  $('#open-chatgpt').addEventListener('click', () => openIn('chatgpt'));
+  $('#coverage').addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) askSingle(b.dataset.ask); });
+  $('#more-btn').addEventListener('click', answerMore);
+  $('#polish-btn').addEventListener('click', polish);
+  $('#restart-btn').addEventListener('click', () => { resetState(); $('#idea').value = ''; showScreen('describe'); $('#idea').focus(); });
+  $('#result-notice').addEventListener('click', (e) => { if (e.target.closest('[data-open-settings]')) openSettings(); });
+
+  $('#theme-btn').addEventListener('click', () => applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+  $('#settings-btn').addEventListener('click', openSettings);
+  $('#ai-badge').addEventListener('click', openSettings);
+  $('#settings-close').addEventListener('click', closeSettings);
+  $('#settings-cancel').addEventListener('click', closeSettings);
+  $('#settings-modal').addEventListener('click', (e) => { if (e.target === $('#settings-modal')) closeSettings(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#settings-modal').classList.contains('hidden')) closeSettings(); });
+  $('#provider-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; readSettingsForm(); draft.provider = b.dataset.p; if (draft.provider === 'custom' && !draft.baseUrl) draft.baseUrl = 'http://localhost:11434/v1'; renderSettings(); });
+  $('#s-key-toggle').addEventListener('click', () => { const i = $('#s-key'); i.type = i.type === 'password' ? 'text' : 'password'; $('#s-key-toggle').textContent = i.type === 'password' ? 'Show' : 'Hide'; });
+  $('#s-fetch-models').addEventListener('click', async () => {
+    const btn = $('#s-fetch-models'); btn.disabled = true; btn.textContent = 'Fetching…';
+    try {
+      const ids = await withTempSettings(() => API.models());
+      $('#model-list').innerHTML = ids.map((m) => `<option value="${esc(m)}">`).join('');
+      $('#s-test-result').textContent = `${ids.length} models loaded — start typing in the model box to pick one.`;
+      if (!$('#s-model').value && ids.length) $('#s-model').value = ids[0];
+    } catch (e) { $('#s-test-result').textContent = 'Could not fetch models: ' + e.message; }
+    finally { btn.disabled = false; btn.textContent = 'Fetch list'; }
+  });
+  $('#s-test').addEventListener('click', async () => {
+    const out = $('#s-test-result'); out.textContent = 'Testing…';
+    try {
+      const reply = await withTempSettings(() => API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 20 }));
+      out.textContent = 'Connected ✓ (model replied: ' + reply.trim().slice(0, 40) + ')';
+    } catch (e) { out.textContent = 'Failed: ' + e.message; }
+  });
+  $('#settings-save').addEventListener('click', () => {
+    readSettingsForm();
+    if (draft.provider === 'custom' && !/^https?:\/\//i.test(draft.baseUrl)) { toast('Enter a base URL that starts with http:// or https://', 'bad'); return; }
+    if ((draft.provider === 'anthropic' || draft.provider === 'openai') && !draft.apiKey) { toast('Add an API key, or choose "Off"', 'bad'); return; }
+    Object.assign(settings, draft); saveSettings(); closeSettings();
+    toast(aiEnabled() ? 'AI assistance is on' : 'Built-in mode', 'ok');
+    if (state.screen === 'result') renderResult();
+  });
+  $('#s-wipe').addEventListener('click', () => { if (confirm('Delete your API key, settings, and saved briefs from this browser?')) wipeAll(); });
+
+  window.PromptForge = { state, DIMS, buildStructuredPrompt, settings }; // handy for debugging / customizing
+}
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

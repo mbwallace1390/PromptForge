@@ -1,0 +1,14 @@
+{
+  "name": "promptforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turns a rough idea into a detailed, build-ready AI prompt. Single-file web app.",
+  "type": "module",
+  "scripts": {
+    "test": "node test/e2e.mjs",
+    "postinstall": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}
