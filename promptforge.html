@@ -277,6 +277,10 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .notice.warn { border-color: var(--warn); color: var(--text); background: var(--accent-soft); }
 .notice.ok { border-color: var(--ok); background: var(--ok-soft); color: var(--text); }
 .notice.bad { border-color: var(--bad); background: var(--bad-soft); color: var(--text); }
+.notice + .notice { margin-top: .6rem; }
+.notice ul { margin: .35rem 0 0 1.1rem; padding: 0; }
+.notice li { margin: .2rem 0; }
+.notice li .btn { margin-left: .4rem; vertical-align: middle; }
 
 /* ---------- Modal ---------- */
 .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 50; display: grid; place-items: center; padding: 1rem; animation: fade .18s ease; }
@@ -411,6 +415,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
         <button class="btn sm primary" id="copy-btn" type="button">Copy prompt</button>
       </div>
       <div class="notice hidden" id="result-notice"></div>
+      <div class="notice warn hidden" id="sanity"></div>
       <div class="prompt-wrap">
         <pre id="prompt-view" tabindex="0"></pre>
         <textarea id="prompt-edit" class="hidden" spellcheck="false"></textarea>
@@ -990,12 +995,13 @@ function pendingAi() { return state.aiQuestions.filter((q) => !state.asked.inclu
 
 function nextQuestionId() {
   if (state.aiMode) {
+    // Our curated essentials (type, platform, goal, who, features) come first, with their chips: a weak
+    // model must not steer the basics. The AI then asks about what is still unknown.
+    const ess = pendingDims().filter((d) => d.priority === 'essential');
+    if (ess.length) return ess[0].id;
     const ai = pendingAi();
     if (ai.length) return ai[0].id;
-    if (!state.aiDone) return null; // engine will decide whether to fetch another round
-    // The AI is finished; anything essential it never covered (type, features…) still gets asked.
-    const ess = pendingDims().filter((d) => d.priority === 'essential');
-    return ess.length ? ess[0].id : null;
+    return null; // engine fetches another round unless state.aiDone
   }
   const p = pendingDims();
   return p.length ? p[0].id : null;
@@ -1015,6 +1021,24 @@ function getAnswerFor(id) {
   return q ? q.answer : undefined;
 }
 
+/** An AI-written option like "Not sure — you decide" is a delegation, whichever dimension it covers. */
+const DELEGATE_RE = /\b(not sure|you decide|let (?:you|the ai|it) decide|whatever you (?:think|recommend|prefer)|your call|no preference)\b/i;
+/**
+ * AI questions use their own option wording ("web app"), but dependent logic keys off our labels
+ * ("Web app (runs in the browser)" unlocks the platform question). Map what can be mapped; keep the rest verbatim.
+ */
+function canonicalize(dimId, answer) {
+  const text = answerText(answer);
+  if (DELEGATE_RE.test(text) && wordCount(text) <= 6) return { choices: [], text: '', source: 'delegate', via: 'ai', q: answer.q };
+  if (dimId === 'projectType') {
+    let hits = TYPE_PATTERNS.filter(([, re]) => re.test(text)).map(([label]) => label);
+    if (hits.length > 1 && hits.includes(API_TYPE) && !BUILDS_API_RE.test(text)) hits = hits.filter((h) => h !== API_TYPE);
+    // Keep the original wording only when it says more than the label does.
+    if (hits.length === 1) return { ...answer, choices: [hits[0]], text: wordCount(text) > 4 ? text : '' };
+  }
+  return answer;
+}
+
 /** Store an answer for the current question, then re-run detectors (a chosen type may unlock the platform question). */
 function commitAnswer(id, answer) {
   const q = questionById(id);
@@ -1029,7 +1053,7 @@ function commitAnswer(id, answer) {
       if (answer.source === 'skipped') {
         if (!state.answers[aq.covers] || state.answers[aq.covers].source === 'detected') { /* keep whatever we detected */ }
       } else {
-        state.answers[aq.covers] = { ...answer, via: 'ai', q: aq.question };
+        state.answers[aq.covers] = canonicalize(aq.covers, { ...answer, via: 'ai', q: aq.question });
       }
     } else if (answer.source !== 'skipped') {
       const idx = state.extraQA.findIndex((x) => x.id === id);
@@ -1094,11 +1118,13 @@ function audienceNote(users) { const hit = AUDIENCE_NOTES.find(([re]) => re.test
 // Answers that came through an AI-written question use the AI's own option wording, so the canned
 // rewrites below (which key off our chip labels) would mangle them. Quote those verbatim.
 const viaAi = (a) => !!(a && a.via === 'ai');
+/** An AI option on its own ("No, just for the current session") is ambiguous; keep the question it answered. */
+const aiQuoted = (a) => answerText(a) + (a.q ? ` (my answer to: "${a.q}")` : '');
 
 function dataBody() {
   if (delegated('data')) return delegateLine('data');
   const a = state.answers.data; if (!hasContent(a)) return '';
-  if (viaAi(a)) return answerText(a);
+  if (viaAi(a)) return aiQuoted(a);
   const c = (a.choices || []).join(' ');
   let s = '';
   if (/nothing/i.test(c)) s = 'Nothing needs to persist between sessions — keep it stateless and simple.';
@@ -1112,7 +1138,7 @@ function dataBody() {
 function deliverableBody() {
   if (delegated('deliverable')) return delegateLine('deliverable');
   const t = val('deliverable'); if (!t) return '';
-  if (viaAi(state.answers.deliverable)) return t;
+  if (viaAi(state.answers.deliverable)) return aiQuoted(state.answers.deliverable);
   if (has(t, /single file/i)) return 'A single self-contained file I can open or run immediately, with no build step if at all possible.';
   if (has(t, /plan first|then the code/i)) return 'First, a short build plan (architecture, files, order of work). Once I confirm it, the complete code.';
   if (has(t, /just the plan|architecture/i)) return 'A plan and architecture only — no code yet. Describe the components, the data model, the key decisions, and the order you would build things in.';
@@ -1120,19 +1146,22 @@ function deliverableBody() {
   if (has(t, /complete|working code/i)) return 'Complete, working code for everything in the must-have list, organized into files as appropriate, plus any setup steps.';
   return t;
 }
+// Wording from our chips and from AI-written options alike ("Not very comfortable (need more guidance)").
+const BEGINNER_RE = /beginner|\bnew\b|novice|non-?technical|not a (programmer|developer|coder)|no (coding )?experience|not (very |really |that )?comfortable|need(s)? (more |some )?(guidance|help|hand-?holding)|never coded|little experience/i;
+const EXPERT_RE = /experienced|expert|senior|professional|skip the basics|\bdeveloper\b|\bengineer\b/i;
 function skillBody() {
-  const t = delegated('skillLevel') ? '' : val('skillLevel');
   if (delegated('skillLevel')) return delegateLine('skillLevel');
+  const t = val('skillLevel');
   if (!t) return '';
-  if (viaAi(state.answers.skillLevel)) return t;
-  if (has(t, /beginner|new|novice|non-?technical|not a (programmer|developer)|no experience/i)) return "I'm new to programming. Explain what you're doing in plain language, define any jargon, and give exact step-by-step instructions for installing, running, and testing. Prefer simple, well-known tools over clever ones.";
-  if (has(t, /experienced|expert|senior|professional|skip the basics|developer/i)) return "I'm an experienced developer. Skip the basics and focus on architecture decisions, trade-offs, and clean, idiomatic code.";
+  if (has(t, BEGINNER_RE)) return "I'm new to programming. Explain what you're doing in plain language, define any jargon, and give exact step-by-step instructions for installing, running, and testing. Prefer simple, well-known tools over clever ones.";
+  if (has(t, EXPERT_RE)) return "I'm an experienced developer. Skip the basics and focus on architecture decisions, trade-offs, and clean, idiomatic code.";
+  if (viaAi(state.answers.skillLevel)) return aiQuoted(state.answers.skillLevel); // unrecognised AI wording: quote it rather than guess
   return "I can read and modify code but I'm not an expert. Explain the key decisions briefly and point out anything I'll need to set up or configure myself." + (has(t, /some experience|follow along/i) ? '' : ` (${t})`);
 }
 function startingBody() {
   if (delegated('startingPoint')) return delegateLine('startingPoint');
   const a = state.answers.startingPoint; if (!hasContent(a)) return '';
-  if (viaAi(a)) return answerText(a);
+  if (viaAi(a)) return aiQuoted(a);
   const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
   if (/scratch/i.test(c)) return 'This is a brand-new project.' + (extra ? ' ' + extra : '');
   if (/existing/i.test(c)) return "I'm adding to an existing project: " + (extra || "I'll share the relevant code — ask me for whatever you need to see before changing anything.");
@@ -1142,7 +1171,7 @@ function startingBody() {
 function integrationsBody() {
   if (delegated('integrations')) return delegateLine('integrations');
   const a = state.answers.integrations; if (!hasContent(a)) return '';
-  if (viaAi(a)) return answerText(a);
+  if (viaAi(a)) return aiQuoted(a);
   if (isUnconfirmed(a)) return `My description mentions ${listJoin(a.hits)}. Treat each as something this needs to connect to, and ask me for any details or keys you need.`;
   const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
   if (/^no$/i.test(c.trim()) && !extra) return 'None — keep it self-contained.';
@@ -1162,7 +1191,7 @@ function constraintsBody() {
 function designBody() {
   if (delegated('design')) return delegateLine('design');
   const a = state.answers.design; if (!hasContent(a)) return '';
-  if (viaAi(a)) return answerText(a);
+  if (viaAi(a)) return aiQuoted(a);
   if (isUnconfirmed(a)) return `Follow what I described: ${a.hits.join(', ')}.`;
   const c = (a.choices || []).filter((x) => !/function over form/i.test(x));
   const extra = (a.text || '').trim();
@@ -1199,7 +1228,7 @@ function buildStructuredPrompt() {
   out += section('What I want to build', what);
 
   if (delegated('users')) out += section("Who it's for", delegateLine('users'));
-  else if (viaAi(state.answers.users)) out += section("Who it's for", val('users'));
+  else if (viaAi(state.answers.users)) out += section("Who it's for", aiQuoted(state.answers.users));
   else if (val('users')) out += section("Who it's for", val('users') + '.' + audienceNote(val('users')));
 
   out += section('Type and platform', typeLines());
@@ -1220,7 +1249,7 @@ function buildStructuredPrompt() {
   else if (val('techStack')) {
     const a = state.answers.techStack;
     let s = '';
-    if (viaAi(a)) s = answerText(a);
+    if (viaAi(a)) s = aiQuoted(a);
     else if (isUnconfirmed(a)) s = `I mentioned ${listJoin(a.hits)} in my description. Use those unless there's a strong reason not to, and tell me if so.`;
     else {
       const choices = (a.choices || []).filter((c) => !/no preference|other \(say which\)/i.test(c));
@@ -1243,9 +1272,17 @@ function buildStructuredPrompt() {
 
   if (state.extraQA.length) out += section('Additional details', state.extraQA.map((x) => `**${x.q}**\n${x.a}`).join('\n\n'));
 
-  const unspec = unspecifiedDims();
-  if (unspec.length) out += section("Things I didn't specify", `I haven't decided on: ${unspec.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result.`);
+  out += section("Things I didn't specify", unspecifiedBody());
+  out += section('How to work with me', rulesBody());
 
+  return out.trim() + '\n';
+}
+/** The two sections that make or break the prompt. Written by us, and pinned back onto any AI rewrite. */
+function unspecifiedBody() {
+  const unspec = unspecifiedDims();
+  return unspec.length ? `I haven't decided on: ${unspec.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result.` : '';
+}
+function rulesBody() {
   const rules = [];
   const skill = skillBody(); if (skill) rules.push(skill);
   rules.push("Before you write any code, restate your understanding of this project in a few sentences and list the assumptions you're making. If something is unclear and would significantly change the outcome, ask me — otherwise make a reasonable choice and tell me what you chose.");
@@ -1253,9 +1290,51 @@ function buildStructuredPrompt() {
   rules.push('Keep the code organized and commented so it can be maintained later.');
   rules.push("When you're done, tell me exactly how to run it and how to test that each must-have feature works.");
   rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
-  out += section('How to work with me', rules.map((r) => `- ${r}`).join('\n'));
+  return rules.map((r) => `- ${r}`).join('\n');
+}
+const PINNED_HEADINGS = [
+  /^#{1,6}\s*(things i (?:didn'?t|did not|haven'?t|have not) (?:specif|decid)|unspecified|not specified)/i,
+  /^#{1,6}\s*(how to work with me|working with me|how i (?:want|like|prefer) to work)/i,
+];
+/**
+ * Small models rewrite "I haven't decided on X" into decisions the person never made, pad the rules
+ * with filler, and duplicate sections. So after any polish, the model's versions of these two sections
+ * are removed and ours are appended, word for word.
+ */
+function pinSections(text) {
+  const lines = String(text).split('\n');
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    const h = /^(#{1,6})\s/.exec(lines[i]);
+    if (!h || !PINNED_HEADINGS.some((re) => re.test(lines[i]))) { kept.push(lines[i]); continue; }
+    // Drop from this heading up to the next heading of the same or a higher level.
+    const level = h[1].length;
+    while (i + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[i + 1]); if (n && n[1].length <= level) break; i++; }
+  }
+  const body = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return (body + '\n\n' + section("Things I didn't specify", unspecifiedBody()) + section('How to work with me', rulesBody())).trim() + '\n';
+}
 
-  return out.trim() + '\n';
+/**
+ * Cheap consistency checks a human reviewer would raise. Each hint names the dimension to revisit.
+ * Heuristic and non-blocking: shown as "worth checking" on the result screen.
+ */
+function sanityHints() {
+  const hints = [];
+  const everything = [state.description, val('purpose'), val('coreFeatures')].join('\n');
+  const data = state.answers.data;
+  const dataText = answerText(data);
+  const saysNothing = hasContent(data) && data.source !== 'delegate'
+    && /\b(nothing (?:needs|has) to be saved|nothing (?:is )?saved|no(?:,| need for| need to)? (?:saving|storage|data|persistence)|current session|stateless|don'?t need to (?:save|store))\b/i.test(dataText)
+    && !/\b(but|except|keep|remember|history|sync)\b/i.test(dataText); // "No accounts, but keep history" is not "nothing"
+  if (saysNothing && /\b(catalog(ue)?|log|track|record|history|inventory|library|list|manage|save|notes?|journal|database|collection)\b/i.test(everything)) {
+    hints.push({ dim: 'data', text: 'You said nothing needs to be saved, but this sounds like it keeps records (catalog, log, track…). If the data must survive closing the app, change the Data & accounts answer.' });
+  }
+  const feats = toList(val('coreFeatures'));
+  if (feats.length === 1 && /\b(view|see|show|display|browse|look at|read|list)\b/i.test(feats[0]) && !/\b(add|create|enter|import|upload|edit|log|record|sync|fetch|pull|scan|type)\b/i.test(feats[0])) {
+    hints.push({ dim: 'coreFeatures', text: "Only one must-have feature, and it's about viewing. Where does the data come from — typed in, imported, or fetched from somewhere? Add that as a feature, or the AI will guess." });
+  }
+  return hints;
 }
 
 /* ---------- 6. AI layer (optional) ---------- */
@@ -1301,7 +1380,8 @@ Rules:
 - Write in the first person, as the person speaking to the AI that will build the project.
 - Keep every fact, preference and constraint they gave. Do not invent features, integrations or requirements they did not ask for. Where they said "not sure" or "let the AI decide", explicitly hand that decision to the AI and ask it to state its choice.
 - Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
-- Use this structure, skipping a section only when there is truly nothing for it: title; overview (what, why, who); type and platform; must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; starting point; what to deliver; success criteria; open questions; how to work with me (experience level, restate understanding and list assumptions before coding, build must-haves first, explain how to run and test, push back on bad ideas).
+- Use this structure, skipping a section only when there is truly nothing for it: title; overview (what, why, who); type and platform; must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; starting point; what to deliver; success criteria; open questions.
+- Do not write a "How to work with me" section or a "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Both sections are appended afterwards exactly as the person wrote them.
 - Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
 - Output only the prompt, in Markdown.`;
 
@@ -1504,7 +1584,7 @@ function qaSummary() {
   });
 }
 async function aiFetchQuestions() {
-  const perRound = state.depth === 'quick' ? 4 : 5;
+  const perRound = state.depth === 'quick' ? 3 : 5; // the built-in essentials already took a few slots in quick mode
   const user = `PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
   // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
   // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
@@ -1745,6 +1825,11 @@ function renderResult() {
   else if (p.view === 'polished' && p.polished && p.truncated) { notice.className = 'notice warn'; notice.textContent = "The AI-polished prompt hit the model's output limit and may be cut off at the end. Check it, or polish again."; }
   else notice.className = 'notice hidden';
 
+  const hints = sanityHints();
+  const sanity = $('#sanity');
+  sanity.classList.toggle('hidden', !hints.length);
+  sanity.innerHTML = hints.length ? '<strong>Worth checking</strong><ul>' + hints.map((h) => `<li>${esc(h.text)}<button class="btn ghost sm" type="button" data-ask="${h.dim}">change answer</button></li>`).join('') + '</ul>' : '';
+
   const s = strength();
   $('#ring').style.setProperty('--p', s.pct); $('#ring-pct').textContent = s.pct + '%'; $('#ring-label').textContent = s.label;
   const cov = [];
@@ -1790,7 +1875,7 @@ async function polish() {
     const { text: raw, truncated } = await API.chat({ system: POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000, onDelta, signal: ctl.signal });
     if (ctl.signal.aborted) return;
     if (!raw.trim()) throw new Error('empty response');
-    state.prompt.polished = cleanMarkdown(raw);
+    state.prompt.polished = pinSections(cleanMarkdown(raw));
     state.prompt.truncated = truncated; // a cut-off prompt is still useful; the result screen warns about it
     state.prompt.view = 'polished';
     if (frame) cancelAnimationFrame(frame);
@@ -1967,7 +2052,7 @@ function init() {
   $('#edit-btn').addEventListener('click', toggleEdit);
   $('#open-claude').addEventListener('click', () => openIn('claude'));
   $('#open-chatgpt').addEventListener('click', () => openIn('chatgpt'));
-  $('#coverage').addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) { cancelPolish(); askSingle(b.dataset.ask); } });
+  for (const id of ['#coverage', '#sanity']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) { cancelPolish(); askSingle(b.dataset.ask); } });
   $('#more-btn').addEventListener('click', () => { cancelPolish(); answerMore(); });
   $('#polish-btn').addEventListener('click', polish);
   $('#restart-btn').addEventListener('click', () => { cancelPolish(); resetState(); $('#idea').value = ''; showScreen('describe'); $('#idea').focus(); });

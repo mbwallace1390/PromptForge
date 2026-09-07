@@ -15,17 +15,27 @@ fs.mkdirSync(SHOTS, { recursive: true });
 // ---------- mock server: OpenAI-compatible under /v1, Anthropic-shaped under /anthropic/v1 ----------
 let mockCalls = [];
 const hanging = new Set(); // responses deliberately never answered (timeout test); closed at exit
-const POLISHED = '# Polished prompt\n\nThis is the AI-polished version.\n\n## Must-have features\n1. Log flights\n';
+// The mock "polish" misbehaves the way a small model does: it invents a decision under "Things I didn't
+// specify" and pads the rules. The app must strip both and pin its own versions.
+const POLISHED = '# Polished prompt\n\nThis is the AI-polished version.\n\n## Must-have features\n1. Log flights\n\n## Things I didn\'t specify\n- Invented decision: dark mode\n\n## How to work with me\n- Padded rule. I appreciate your guidance.\n';
 const QUESTIONS_ROUND_1 = { questions: [
   { id: 'battery_tracking', label: 'Battery tracking', question: 'How should battery cycles be tracked — per battery with a label, or just a total count?', why: 'It changes the data model.', options: ['Per battery with a label', 'Just a total', 'Not sure — you decide'], allowMultiple: false, covers: 'other' },
   { id: 'who', question: 'Roughly how many club members will use it?', options: ['Under 10', '10–50', 'More than 50'], covers: 'users' },
+] };
+// AI-written options in the model's own words, mapped onto dimensions whose logic keys off our labels.
+const QUESTIONS_CANON = { questions: [
+  { id: 'kind', question: 'Is this a website, an app, or something else?', options: ['web app', 'mobile app'], covers: 'projectType' },
+  { id: 'skill', question: 'How comfortable are you with programming?', options: ['Not very comfortable (need more guidance)', 'Fairly comfortable'], covers: 'skillLevel' },
+  { id: 'remember', question: 'Does it need to remember anything between uses?', options: ['No, just for the current session', 'Yes'], covers: 'data' },
+  { id: 'stack', question: 'Any technology preference?', options: ['Not sure — you decide', 'Python'], covers: 'techStack' },
 ] };
 /** What the "model" says for a given system prompt + user message, and how it stopped. */
 function mockReply(sys, user) {
   if (/connectivity test/i.test(sys)) return { content: 'OK', stop: 'stop' };
   if (/software consultant/i.test(sys)) {
     const round = /round (\d)/.exec(user)?.[1];
-    return { content: round === '1' ? '```json\n' + JSON.stringify(QUESTIONS_ROUND_1) + '\n```' : JSON.stringify({ questions: [] }), stop: 'stop' };
+    const qs = /CANON-TEST/.test(user) ? QUESTIONS_CANON : QUESTIONS_ROUND_1;
+    return { content: round === '1' ? '```json\n' + JSON.stringify(qs) + '\n```' : JSON.stringify({ questions: [] }), stop: 'stop' };
   }
   return { content: POLISHED, stop: /TRUNCATE-ME/.test(user) ? 'length' : 'stop' }; // 'length' = hit the output cap
 }
@@ -131,6 +141,23 @@ async function answerLoop(page, maxSteps = 20) {
     await page.click('#q-next');
   }
   return asked;
+}
+/** The polished text the app must show after pinning its own sections onto the mock's output. */
+function checkPinned(page, text, label) {
+  check(text.startsWith('# Polished prompt'), label + ': polished text does not start with the model output');
+  check(!/Invented decision|Padded rule/.test(text), label + ": model's own pinned sections were not stripped");
+  check(/## Things I didn't specify\nI haven't decided on:/.test(text), label + ': canonical "Things I didn\'t specify" missing');
+  check(/## How to work with me\n(- .*\n)*- Before you write any code/.test(text) && text.trim().endsWith('doing something different.'), label + ': canonical rules missing or not last');
+}
+/** In AI mode the built-in essentials come first; Skip through them until the AI round runs and its toast matches `re`. */
+async function skipUntilToast(page, re, maxSteps = 8) {
+  for (let i = 0; i < maxSteps; i++) {
+    await page.waitForSelector('#qcard:not(.hidden)', { timeout: 10000 });
+    const toast = await page.$eval('#toast', (el) => el.textContent);
+    if (re.test(toast)) return toast;
+    await page.click('#q-skip');
+  }
+  return await page.$eval('#toast', (el) => el.textContent);
 }
 /** Press Skip until the question whose text matches `re` is on screen (or the result screen appears). */
 async function skipUntil(page, re, maxSteps = 15) {
@@ -238,13 +265,15 @@ await test('Test 3: AI mode (mock server)', async () => {
   const polished = await promptText(page);
   log(`  AI asked ${asked.length} questions; mock calls: ${mockCalls.map((c) => c.sys).join(' | ')}`);
   check(polished.includes('Polished prompt'), 'polished view not shown');
+  checkPinned(page, polished, 'Test 3');
   check(await page.$eval('#result-notice', (el) => el.classList.contains('hidden')), 'a complete polish must not show the cut-off warning');
   await page.click('#tab-structured');
   const structured = await promptText(page);
   check(structured.includes('Additional details') && structured.includes('battery cycles be tracked'), 'AI "other" answer missing from structured prompt');
-  check(/## Who it's for\n10–50\n/.test(structured), 'AI "covers: users" answer must be quoted verbatim, without the canned audience note');
-  // The mock's second round is empty, so the AI is done — the built-in essentials it never covered still get asked.
-  check(asked.some((q) => /must the first version/i.test(q)), 'essential built-in question (features) not asked after the AI ran dry');
+  check(/## Who it's for\n10–50 \(my answer to: "Roughly how many club members will use it\?"\)\n/.test(structured), 'AI "covers: users" answer must be quoted with its question, without the canned audience note');
+  // Built-in essentials come first, then the AI rounds; the features question is one of them.
+  check(asked.some((q) => /must the first version/i.test(q)), 'essential built-in question (features) not asked in AI mode');
+  check(asked.findIndex((q) => /must the first version/i.test(q)) < asked.findIndex((q) => /battery cycles be tracked/.test(q)), 'built-in essentials should be asked before the AI questions');
   check(/1\. Log a flight with date, model and duration/.test(structured), 'features answered after AI rounds missing from the prompt');
   fs.writeFileSync(path.join(SHOTS, 'prompt-ai-structured.md'), structured);
   // settings modal: fetch models + test connection
@@ -271,9 +300,8 @@ await test('Test 4: AI failure fallback', async () => {
   const page = await newPage({ provider: 'custom', baseUrl: 'http://localhost:1/v1', apiKey: 'test', model: 'mock', autoPolish: true, depth: 'quick' });
   await page.fill('#idea', 'A Discord bot that posts the weather for our field every morning.');
   await page.click('#start-btn');
-  await page.waitForSelector('#qcard:not(.hidden)', { timeout: 10000 });
+  const toast = await skipUntilToast(page, /AI unavailable/);
   const q = await page.$eval('#q-text', (el) => el.textContent);
-  const toast = await page.$eval('#toast', (el) => el.textContent);
   log('  fell back to: ' + q + '  | toast: ' + toast);
   check(toast.includes('AI unavailable'), 'fallback toast missing');
   await page.context().close();
@@ -373,9 +401,8 @@ await test('Test 9: API timeout', async () => {
   await page.fill('#idea', 'A Discord bot that posts the weather for our field every morning.');
   await page.click('#start-btn');
   const t0 = Date.now();
-  await page.waitForSelector('#qcard:not(.hidden)', { timeout: 10000 });
-  const toast = await page.$eval('#toast', (el) => el.textContent);
-  log(`  recovered after ${Date.now() - t0} ms; toast: ${toast}`);
+  const toast = await skipUntilToast(page, /took too long/);
+  log(`  recovered after ${Date.now() - t0} ms (includes skipping the built-in essentials); toast: ${toast}`);
   check(/took too long/.test(toast), 'timeout not reported: ' + toast);
   check(!(await page.$eval('#finish-btn', (el) => el.disabled)), 'finish button left disabled after the timeout');
   await page.context().close();
@@ -411,7 +438,7 @@ await test('Test 11: streaming polish', async () => {
   log(`  partial text visible mid-stream: ${JSON.stringify(partial.slice(0, 40))}… (${partial.length} chars)`);
   check(partial.length < POLISHED.length, 'expected a partial prompt mid-stream, got the whole thing at once');
   await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
-  check((await promptText(page)).trim() === POLISHED.trim(), 'streamed prompt does not match what the server sent');
+  checkPinned(page, await promptText(page), 'Test 11');
   check(await page.$eval('#tab-polished', (el) => el.classList.contains('on') && !el.disabled), 'polished tab not active after the stream');
   const polishCall = mockCalls.find((c) => /outstanding prompts/.test(c.sys));
   check(polishCall && polishCall.body.stream === true, 'polish request did not ask for a stream');
@@ -420,7 +447,7 @@ await test('Test 11: streaming polish', async () => {
   // Switching tabs mid-stream and editing are covered by the app guarding state.prompt.view; a second polish streams again.
   await page.click('#polish-btn');
   await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
-  check((await promptText(page)).trim() === POLISHED.trim(), 'second polish did not stream cleanly');
+  checkPinned(page, await promptText(page), 'Test 11 second polish');
   await page.context().close();
 });
 
@@ -435,7 +462,7 @@ await test('Test 12: Anthropic path (mock)', async () => {
   check(asked.some((q) => /battery cycles be tracked/.test(q)), 'AI question from the Claude mock never appeared');
   await page.waitForSelector('#screen-result:not(.hidden)');
   await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled && document.querySelector('#tab-polished').classList.contains('on'), null, { timeout: 8000 });
-  check((await promptText(page)).trim() === POLISHED.trim(), 'Claude SSE stream did not reassemble into the polished prompt');
+  checkPinned(page, await promptText(page), 'Test 12');
   const q = mockCalls.find((c) => /software consultant/.test(c.sys))?.body || {};
   log('  question request: ' + JSON.stringify({ output_config: q.output_config, max_tokens: q.max_tokens, stream: q.stream }));
   check(q.output_config?.format?.type === 'json_schema' && q.output_config.format.schema?.properties?.questions, 'question request lacks output_config.format json_schema');
@@ -461,12 +488,66 @@ await test('Test 13: schema-less server fallback', async () => {
   const page = await newPage({ provider: 'custom', baseUrl: 'http://localhost:8787/v1', apiKey: 'test', model: 'mock-noschema', autoPolish: false, depth: 'quick' });
   await page.fill('#idea', 'A simple Android app for my RC club where members log flights and track battery cycles.');
   await page.click('#start-btn');
-  await page.waitForSelector('#qcard:not(.hidden)', { timeout: 10000 });
-  const q = await page.$eval('#q-text', (el) => el.textContent);
+  // Built-in essentials come first; skipping through them triggers the AI round.
+  const reached = await skipUntil(page, /battery cycles be tracked/);
   const attempts = mockCalls.filter((c) => /software consultant/.test(c.sys) && /round 1/.test(c.user));
-  log(`  first question: ${q}; round-1 attempts: ${attempts.map((a) => (a.body.response_format ? 'with schema' : 'without')).join(', ')}`);
-  check(/battery cycles be tracked/.test(q), 'AI questions lost after the server rejected response_format');
+  log(`  AI question reached: ${reached}; round-1 attempts: ${attempts.map((a) => (a.body.response_format ? 'with schema' : 'without')).join(', ')}`);
+  check(reached, 'AI questions lost after the server rejected response_format');
   check(attempts.length === 2 && !!attempts[0].body.response_format && !attempts[1].body.response_format, 'expected exactly one retry without response_format');
+  await page.context().close();
+});
+
+// ---------- Test 14: sanity hints on the result screen ----------
+await test('Test 14: sanity hints', async () => {
+  const page = await newPage(null);
+  await page.fill('#idea', 'A web app to catalog my book series in chronological order.');
+  await page.click('#start-btn');
+  await page.waitForSelector('#screen-refine:not(.hidden)');
+  check(await skipUntil(page, /must the first version/i), 'features question not reached');
+  await page.fill('#q-free', 'View series info'); await page.click('#q-next');
+  check(await skipUntil(page, /remember anything between uses/i), 'data question not reached');
+  await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next'); // "Nothing needs to be saved"
+  await skipUntil(page, /never matches/);
+  await page.waitForSelector('#screen-result:not(.hidden)');
+  const hints = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
+  log('  hints: ' + hints.replace(/\s+/g, ' ').trim());
+  check(/nothing needs to be saved/i.test(hints), 'no hint about a catalog that saves nothing');
+  check(/Where does the data come from/.test(hints), 'no hint about a single view-only feature');
+  // "change answer" on a hint reopens that question; a real answer clears the hint.
+  await page.click('#sanity [data-ask="data"]');
+  await page.waitForSelector('#screen-refine:not(.hidden)');
+  check(/remember anything between uses/i.test(await page.$eval('#q-text', (el) => el.textContent)), 'hint button did not reopen the data question');
+  await page.click('#q-chips .chip >> nth=1'); await page.click('#q-next'); // "Save on the device only"
+  await page.waitForSelector('#screen-result:not(.hidden)');
+  const after = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
+  check(!/nothing needs to be saved/i.test(after) && /Where does the data come from/.test(after), 'hints did not update after changing the data answer');
+  await page.context().close();
+});
+
+// ---------- Test 15: AI-written options mapped onto our labels ----------
+await test('Test 15: canonicalised AI answers', async () => {
+  mockCalls = [];
+  const page = await newPage({ provider: 'custom', baseUrl: 'http://localhost:8787/v1', apiKey: 'test', model: 'mock', autoPolish: false, depth: 'quick' });
+  await page.fill('#idea', 'CANON-TEST I want to catalog each series of books in chronological order for library staff.');
+  await page.click('#start-btn');
+  // Skip our own essentials so the AI's answers are the only ones on record.
+  check(await skipUntil(page, /Is this a website/), 'AI type question not reached');
+  const asked = [];
+  for (let i = 0; i < 8; i++) {
+    const q = await page.$eval('#q-text', (el) => el.textContent); asked.push(q);
+    await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next');
+    await page.waitForFunction(() => !document.querySelector('#screen-result').classList.contains('hidden') || !document.querySelector('#qcard').classList.contains('hidden'), null, { timeout: 8000 });
+    if (!(await page.$eval('#screen-result', (el) => el.classList.contains('hidden')))) break;
+  }
+  log('  asked after the AI round: ' + asked.join(' | '));
+  check(asked.some((q) => /Where does it need to run/.test(q)), '"web app" was not mapped onto our type label, so the platform question never came');
+  const prompt = await promptText(page);
+  check(/- \*\*Type:\*\* Web app \(runs in the browser\)\n/.test(prompt), 'type not canonicalised: ' + (/\*\*Type:\*\*[^\n]*/.exec(prompt) || [])[0]);
+  check(/- \*\*Platform:\*\* Desktop browsers\n/.test(prompt), 'platform answer missing');
+  check(/## How to work with me\n- I'm new to programming/.test(prompt), '"not very comfortable" not mapped onto the beginner wording');
+  check(/## Data and accounts\nNo, just for the current session \(my answer to: "Does it need to remember anything between uses\?"\)\n/.test(prompt), 'AI data answer not shown with its question');
+  check(/## Technology\nNo strong preference\./.test(prompt), '"Not sure — you decide" not treated as a delegation');
+  check(/nothing needs to be saved/i.test(await page.$eval('#sanity', (el) => el.textContent)), 'catalog + "current session only" did not raise the sanity hint');
   await page.context().close();
 });
 
