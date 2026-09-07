@@ -28,6 +28,7 @@ Single-file web app that turns a rough idea into a detailed prompt an AI coding 
 ## Working on it
 
 - Open `promptforge.html` in a browser to run it. `window.PromptForge` exposes `state`, `DIMS`, `buildStructuredPrompt`, `settings`, `toList`, and `deriveTitle` in the console (the last two so the test can drive them directly).
-- `API.chat` resolves to `{ text, truncated }` and takes an optional `effort` (Claude only). Every request goes through `fetchWithTimeout` (`settings.apiTimeoutMs`, default 45 s); a stalled call must fall back, never hang the interview.
+- `API.chat` resolves to `{ text, truncated }` and takes optional `effort` (Claude only), `schema` (structured outputs on Claude, `response_format` elsewhere; a `custom` server answering 400/422 gets one retry without it), `onDelta` (stream the reply; both providers' SSE shapes are parsed by `readSSE`), and `signal`. Every request goes through `fetchWithTimeout` (`settings.apiTimeoutMs`, default 45 s, renewed while a stream delivers); a stalled call must fall back, never hang the interview. `polish()` streams into `#prompt-view` and is cancelled by `cancelPolish()` on restart, history load, or a new question.
+- `settings.anthropicBase` (default `https://api.anthropic.com`) exists so the test can point the Claude path at the mock server's `/anthropic` routes; it is not in the settings UI.
 - `npm install` once (installs Playwright and its Chromium), then `npm test` after changes. The only expected console error in the test output is `ERR_UNSAFE_PORT` from the deliberate failure test.
 - When the interview flow changes, update `answerLoop()` in the test so it still answers every question type.

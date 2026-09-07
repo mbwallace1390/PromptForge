@@ -12,40 +12,74 @@ const FILE = pathToFileURL(process.env.PF_FILE ? path.resolve(process.env.PF_FIL
 const SHOTS = path.join(DIR, 'shots');
 fs.mkdirSync(SHOTS, { recursive: true });
 
-// ---------- mock OpenAI-compatible server ----------
+// ---------- mock server: OpenAI-compatible under /v1, Anthropic-shaped under /anthropic/v1 ----------
 let mockCalls = [];
 const hanging = new Set(); // responses deliberately never answered (timeout test); closed at exit
+const POLISHED = '# Polished prompt\n\nThis is the AI-polished version.\n\n## Must-have features\n1. Log flights\n';
+const QUESTIONS_ROUND_1 = { questions: [
+  { id: 'battery_tracking', label: 'Battery tracking', question: 'How should battery cycles be tracked — per battery with a label, or just a total count?', why: 'It changes the data model.', options: ['Per battery with a label', 'Just a total', 'Not sure — you decide'], allowMultiple: false, covers: 'other' },
+  { id: 'who', question: 'Roughly how many club members will use it?', options: ['Under 10', '10–50', 'More than 50'], covers: 'users' },
+] };
+/** What the "model" says for a given system prompt + user message, and how it stopped. */
+function mockReply(sys, user) {
+  if (/connectivity test/i.test(sys)) return { content: 'OK', stop: 'stop' };
+  if (/software consultant/i.test(sys)) {
+    const round = /round (\d)/.exec(user)?.[1];
+    return { content: round === '1' ? '```json\n' + JSON.stringify(QUESTIONS_ROUND_1) + '\n```' : JSON.stringify({ questions: [] }), stop: 'stop' };
+  }
+  return { content: POLISHED, stop: /TRUNCATE-ME/.test(user) ? 'length' : 'stop' }; // 'length' = hit the output cap
+}
+/** Stream `content` as a few SSE chunks with a gap between them, so a test can see partial text arrive. */
+function streamChunks(res, headers, chunks, tail) {
+  res.writeHead(200, { ...headers, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+  let i = 0;
+  const tick = () => {
+    if (i < chunks.length) { res.write(chunks[i++]); setTimeout(tick, 150); }
+    else { res.write(tail); res.end(); }
+  };
+  tick();
+}
 const server = http.createServer((req, res) => {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
   if (req.url.startsWith('/slow/')) { hanging.add(res); req.on('data', () => {}); return; } // never replies
-  if (req.method === 'GET' && req.url.startsWith('/v1/models')) {
+  const anthropic = req.url.startsWith('/anthropic/');
+  if (req.method === 'GET' && /\/v1\/models/.test(req.url)) {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ data: [{ id: 'mock-large' }, { id: 'mock-small' }] }));
+    return res.end(JSON.stringify({ data: anthropic ? [{ id: 'claude-mock' }] : [{ id: 'mock-large' }, { id: 'mock-small' }] }));
   }
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const j = JSON.parse(body || '{}');
-    const sys = j.messages?.[0]?.content || '';
-    const user = j.messages?.[1]?.content || '';
-    mockCalls.push({ url: req.url, sys: sys.slice(0, 40), user });
-    let content, finish_reason = 'stop';
-    if (/connectivity test/i.test(sys)) content = 'OK';
-    else if (/software consultant/i.test(sys)) {
-      const round = /round (\d)/.exec(user)?.[1];
-      content = round === '1'
-        ? '```json\n' + JSON.stringify({ questions: [
-            { id: 'battery_tracking', label: 'Battery tracking', question: 'How should battery cycles be tracked — per battery with a label, or just a total count?', why: 'It changes the data model.', options: ['Per battery with a label', 'Just a total', 'Not sure — you decide'], allowMultiple: false, covers: 'other' },
-            { id: 'who', question: 'Roughly how many club members will use it?', options: ['Under 10', '10–50', 'More than 50'], covers: 'users' },
-          ] }) + '\n```'
-        : JSON.stringify({ questions: [] });
-    } else {
-      content = '# Polished prompt\n\nThis is the AI-polished version.\n\n## Must-have features\n1. Log flights\n';
-      if (/TRUNCATE-ME/.test(user)) finish_reason = 'length'; // simulate the model hitting its output cap
+    const sys = anthropic ? String(j.system || '') : (j.messages?.[0]?.content || '');
+    const user = anthropic ? (j.messages?.[0]?.content || '') : (j.messages?.[1]?.content || '');
+    mockCalls.push({ url: req.url, sys: sys.slice(0, 40), user, body: j });
+    // A local server that has never heard of response_format answers 400 — the app must retry without it.
+    if (!anthropic && j.model === 'mock-noschema' && j.response_format) {
+      res.writeHead(400, { ...cors, 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'response_format is not supported by this server' } }));
     }
-    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content }, finish_reason }] }));
+    const { content, stop } = mockReply(sys, user);
+    const pieces = content.match(/[\s\S]{1,25}/g) || [''];
+    if (anthropic) {
+      const stop_reason = stop === 'length' ? 'max_tokens' : 'end_turn';
+      if (!j.stream) {
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ type: 'message', role: 'assistant', content: [{ type: 'text', text: content }], stop_reason }));
+      }
+      const ev = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+      return streamChunks(res, cors,
+        [ev('message_start', { message: { id: 'msg_mock', role: 'assistant', content: [] } }) + ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }),
+          ...pieces.map((text) => ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } }))],
+        ev('content_block_stop', { index: 0 }) + ev('message_delta', { delta: { stop_reason }, usage: { output_tokens: 1 } }) + ev('message_stop', {}));
+    }
+    if (!j.stream) {
+      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content }, finish_reason: stop }] }));
+    }
+    const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({ choices: [{ delta, finish_reason }] })}\n\n`;
+    streamChunks(res, cors, pieces.map((content) => chunk({ content })), chunk({}, stop) + 'data: [DONE]\n\n');
   });
 });
 await new Promise((r) => server.listen(8787, r));
@@ -199,7 +233,7 @@ await test('Test 3: AI mode (mock server)', async () => {
   await page.click('#start-btn');
   const asked = await answerLoop(page);
   await page.waitForSelector('#screen-result:not(.hidden)');
-  await page.waitForFunction(() => document.querySelector('#tab-polished').classList.contains('on'), null, { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('#tab-polished').classList.contains('on') && !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
   await page.waitForTimeout(400); await page.screenshot({ path: path.join(SHOTS, '4-ai-result.png') });
   const polished = await promptText(page);
   log(`  AI asked ${asked.length} questions; mock calls: ${mockCalls.map((c) => c.sys).join(' | ')}`);
@@ -349,11 +383,85 @@ await test('Test 10: truncated polish', async () => {
   await page.click('#start-btn');
   await answerLoop(page);
   await page.waitForSelector('#screen-result:not(.hidden)');
-  await page.waitForFunction(() => document.querySelector('#tab-polished').classList.contains('on'), null, { timeout: 8000 });
+  // The polished tab lights up at the first streamed token; the verdict on truncation only exists once the stream ends.
+  await page.waitForFunction(() => document.querySelector('#tab-polished').classList.contains('on') && !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
   const notice = await page.$eval('#result-notice', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
   log('  notice: ' + notice);
   check(/cut off/.test(notice), 'truncated polish not flagged on the result screen');
   check((await promptText(page)).includes('Polished prompt'), 'truncated polish text was thrown away');
+  await page.context().close();
+});
+
+// ---------- Test 11: the polish streams into the view before it has finished ----------
+await test('Test 11: streaming polish', async () => {
+  mockCalls = [];
+  const page = await newPage({ provider: 'custom', baseUrl: 'http://localhost:8787/v1', apiKey: 'test', model: 'mock', autoPolish: true, depth: 'quick' });
+  await page.fill('#idea', 'A Discord bot that posts the weather for our field every morning.');
+  await page.click('#start-btn');
+  await answerLoop(page);
+  await page.waitForSelector('#screen-result:not(.hidden)');
+  // Partial text must be on screen while the request is still running (the button is disabled until it ends).
+  await page.waitForFunction(() => document.querySelector('#prompt-view').textContent.includes('Polished prompt') && document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
+  const partial = await promptText(page);
+  log(`  partial text visible mid-stream: ${JSON.stringify(partial.slice(0, 40))}… (${partial.length} chars)`);
+  check(partial.length < POLISHED.length, 'expected a partial prompt mid-stream, got the whole thing at once');
+  await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
+  check((await promptText(page)).trim() === POLISHED.trim(), 'streamed prompt does not match what the server sent');
+  check(await page.$eval('#tab-polished', (el) => el.classList.contains('on') && !el.disabled), 'polished tab not active after the stream');
+  const polishCall = mockCalls.find((c) => /outstanding prompts/.test(c.sys));
+  check(polishCall && polishCall.body.stream === true, 'polish request did not ask for a stream');
+  const qCall = mockCalls.find((c) => /software consultant/.test(c.sys));
+  check(qCall && qCall.body.response_format?.type === 'json_schema' && qCall.body.response_format.json_schema?.strict === true, 'question request did not enforce the JSON schema');
+  // Switching tabs mid-stream and editing are covered by the app guarding state.prompt.view; a second polish streams again.
+  await page.click('#polish-btn');
+  await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
+  check((await promptText(page)).trim() === POLISHED.trim(), 'second polish did not stream cleanly');
+  await page.context().close();
+});
+
+// ---------- Test 12: the Claude path — structured output + low effort for questions, SSE for the polish ----------
+await test('Test 12: Anthropic path (mock)', async () => {
+  mockCalls = [];
+  const page = await newPage({ provider: 'anthropic', apiKey: 'sk-ant-test', model: 'claude-mock', anthropicBase: 'http://localhost:8787/anthropic', autoPolish: true, depth: 'quick' });
+  check((await page.$eval('#ai-badge-text', (el) => el.textContent)) === 'AI: Claude', 'badge should say Claude');
+  await page.fill('#idea', 'A simple Android app for my RC club where members log flights and track battery cycles.');
+  await page.click('#start-btn');
+  const asked = await answerLoop(page);
+  check(asked.some((q) => /battery cycles be tracked/.test(q)), 'AI question from the Claude mock never appeared');
+  await page.waitForSelector('#screen-result:not(.hidden)');
+  await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled && document.querySelector('#tab-polished').classList.contains('on'), null, { timeout: 8000 });
+  check((await promptText(page)).trim() === POLISHED.trim(), 'Claude SSE stream did not reassemble into the polished prompt');
+  const q = mockCalls.find((c) => /software consultant/.test(c.sys))?.body || {};
+  log('  question request: ' + JSON.stringify({ output_config: q.output_config, max_tokens: q.max_tokens, stream: q.stream }));
+  check(q.output_config?.format?.type === 'json_schema' && q.output_config.format.schema?.properties?.questions, 'question request lacks output_config.format json_schema');
+  check(q.output_config?.effort === 'low', 'question request should run at low effort');
+  check(!q.stream, 'question request should not stream');
+  const p = mockCalls.find((c) => /outstanding prompts/.test(c.sys))?.body || {};
+  log('  polish request: ' + JSON.stringify({ output_config: p.output_config, max_tokens: p.max_tokens, stream: p.stream }));
+  check(p.stream === true && p.max_tokens === 16000 && !p.output_config, 'polish request should stream at full effort with the 16000 cap');
+  // Settings: model list and connection test through the same base URL.
+  await page.click('#settings-btn');
+  await page.click('#s-fetch-models');
+  await page.waitForFunction(() => /models loaded|Could not/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
+  check(/1 models loaded/.test(await page.$eval('#s-test-result', (el) => el.textContent)), 'Claude model list not fetched from the base URL');
+  await page.click('#s-test');
+  await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
+  check(/Connected ✓ \(model replied: OK\)/.test(await page.$eval('#s-test-result', (el) => el.textContent)), 'Claude connection test failed');
+  await page.context().close();
+});
+
+// ---------- Test 13: a local server that rejects response_format gets one retry without it ----------
+await test('Test 13: schema-less server fallback', async () => {
+  mockCalls = [];
+  const page = await newPage({ provider: 'custom', baseUrl: 'http://localhost:8787/v1', apiKey: 'test', model: 'mock-noschema', autoPolish: false, depth: 'quick' });
+  await page.fill('#idea', 'A simple Android app for my RC club where members log flights and track battery cycles.');
+  await page.click('#start-btn');
+  await page.waitForSelector('#qcard:not(.hidden)', { timeout: 10000 });
+  const q = await page.$eval('#q-text', (el) => el.textContent);
+  const attempts = mockCalls.filter((c) => /software consultant/.test(c.sys) && /round 1/.test(c.user));
+  log(`  first question: ${q}; round-1 attempts: ${attempts.map((a) => (a.body.response_format ? 'with schema' : 'without')).join(', ')}`);
+  check(/battery cycles be tracked/.test(q), 'AI questions lost after the server rejected response_format');
+  check(attempts.length === 2 && !!attempts[0].body.response_format && !attempts[1].body.response_format, 'expected exactly one retry without response_format');
   await page.context().close();
 });
 

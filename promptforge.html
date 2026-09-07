@@ -1274,6 +1274,26 @@ Guidelines:
 Return ONLY JSON, no prose, exactly in this shape:
 {"questions":[{"id":"short_snake_case","label":"2-3 word topic","question":"…","why":"one short sentence on why this matters","options":["…"],"allowMultiple":false,"covers":"dimension_id or other"}]}`;
 
+// The shape QUESTION_SYSTEM asks for, enforced by the API (structured outputs / response_format) so a
+// stray sentence or a code fence can never turn a good question round into a fallback to built-in mode.
+// Every object closes with additionalProperties:false and lists all keys as required — the API insists.
+const QUESTION_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['questions'],
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'label', 'question', 'why', 'options', 'allowMultiple', 'covers'],
+        properties: {
+          id: { type: 'string' }, label: { type: 'string' }, question: { type: 'string' }, why: { type: 'string' },
+          options: { type: 'array', items: { type: 'string' } }, allowMultiple: { type: 'boolean' }, covers: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 const POLISH_SYSTEM = `You write outstanding prompts for AI coding assistants (Claude, ChatGPT, Cursor, Claude Code, Copilot and similar). You will receive a person's rough project description, their answers to follow-up questions, and a structured draft prompt. Rewrite it into the best possible build prompt.
 
 Rules:
@@ -1299,11 +1319,48 @@ function networkError(e) {
   if (e instanceof TypeError) return new Error("couldn't reach the API (network, CORS, or a wrong URL)");
   return e;
 }
-/** fetch with a deadline. A stalled request must never leave the interview stuck behind a spinner. */
-async function fetchWithTimeout(url, init, ms) {
+/**
+ * fetch with a deadline that renews while data keeps arriving, so a long stream is fine but a stalled
+ * one is not. A stalled request must never leave the interview stuck behind a spinner.
+ * Resolves to { r, touch, done }: call touch() as chunks arrive, done() when finished with the body.
+ */
+async function fetchWithTimeout(url, init, ms, signal) {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), ms || settings.apiTimeoutMs || 45000);
-  try { return await fetch(url, { ...init, signal: ctl.signal }); } finally { clearTimeout(timer); }
+  const limit = ms || settings.apiTimeoutMs || 45000;
+  let timer = setTimeout(() => ctl.abort(), limit);
+  const touch = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), limit); };
+  const done = () => clearTimeout(timer);
+  if (signal) signal.addEventListener('abort', () => ctl.abort(), { once: true }); // caller cancelled (new polish, restart)
+  try {
+    const r = await fetch(url, { ...init, signal: ctl.signal });
+    return { r, touch, done };
+  } catch (e) { done(); throw e; }
+}
+/** Read a Server-Sent Events body, calling onEvent(eventName, dataString) per event. */
+async function readSSE(r, touch, onEvent) {
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', event = '', data = [];
+  const flush = () => { if (data.length) onEvent(event, data.join('\n')); event = ''; data = []; };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    touch();
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      let line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+      if (line.endsWith('\r')) line = line.slice(0, -1);
+      if (!line) { flush(); continue; }        // blank line ends an event
+      if (line.startsWith(':')) continue;       // comment / keep-alive
+      const colon = line.indexOf(':');
+      const field = colon < 0 ? line : line.slice(0, colon);
+      let val = colon < 0 ? '' : line.slice(colon + 1);
+      if (val.startsWith(' ')) val = val.slice(1);
+      if (field === 'event') event = val; else if (field === 'data') data.push(val);
+    }
+  }
+  flush();
 }
 const API = {
   anthropicHeaders() {
@@ -1311,42 +1368,93 @@ const API = {
   },
   openaiBase() { return settings.provider === 'openai' ? 'https://api.openai.com/v1' : String(settings.baseUrl || '').replace(/\/+$/, ''); },
   openaiHeaders() { const h = { 'Content-Type': 'application/json' }; if (settings.apiKey) h.Authorization = 'Bearer ' + settings.apiKey; return h; },
+  anthropicBase() { return String(settings.anthropicBase || 'https://api.anthropic.com').replace(/\/+$/, ''); },
   /**
    * One chat completion. Resolves to { text, truncated }: `truncated` means the model hit the output
-   * cap, so the caller decides whether a cut-off answer is still usable. `effort` (Claude only) trades
-   * thinking depth for speed — right for a short JSON list, wrong for the final prompt.
+   * cap, so the caller decides whether a cut-off answer is still usable.
+   * - effort (Claude only): trades thinking depth for speed — right for a short JSON list, wrong for the final prompt.
+   * - schema: a JSON schema the reply must satisfy (structured outputs on Claude, response_format elsewhere).
+   * - onDelta(textSoFar): stream the reply and call this as it grows.
+   * - signal: caller-side cancellation.
    */
-  async chat({ system, user, maxTokens = 16000, effort }) {
+  async chat({ system, user, maxTokens = 16000, effort, schema, onDelta, signal }) {
     try {
-      if (settings.provider === 'anthropic') {
-        const body = { model: currentModel(), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] };
-        if (effort) body.output_config = { effort };
-        const r = await fetchWithTimeout('https://api.anthropic.com/v1/messages', { method: 'POST', headers: this.anthropicHeaders(), body: JSON.stringify(body) });
-        const j = await parseResponse(r);
-        if (j.stop_reason === 'refusal') throw new Error('the model declined this request' + (j.stop_details && j.stop_details.explanation ? ': ' + j.stop_details.explanation : ''));
-        return { text: (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(''), truncated: j.stop_reason === 'max_tokens' };
+      return await this.chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal });
+    } catch (e) {
+      // A local / OpenAI-compatible server may not know response_format. Ask once more without it —
+      // the tolerant JSON parser downstream still copes with a plain-text reply.
+      if (schema && settings.provider === 'custom' && /^(400|422)\b/.test(String(e && e.message))) {
+        try { return await this.chatOnce({ system, user, maxTokens, effort, onDelta, signal }); } catch (e2) { throw networkError(e2); }
       }
-      const r = await fetchWithTimeout(this.openaiBase() + '/chat/completions', {
-        method: 'POST', headers: this.openaiHeaders(),
-        body: JSON.stringify({ model: currentModel(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      throw networkError(e);
+    }
+  },
+  async chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal }) {
+    const stream = typeof onDelta === 'function';
+    if (settings.provider === 'anthropic') {
+      const body = { model: currentModel(), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] };
+      if (effort || schema) body.output_config = {};
+      if (effort) body.output_config.effort = effort;
+      if (schema) body.output_config.format = { type: 'json_schema', schema };
+      if (stream) body.stream = true;
+      const { r, touch, done } = await fetchWithTimeout(this.anthropicBase() + '/v1/messages', { method: 'POST', headers: this.anthropicHeaders(), body: JSON.stringify(body) }, 0, signal);
+      try {
+        if (!stream) {
+          const j = await parseResponse(r);
+          return this.anthropicResult((j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(''), j.stop_reason, j.stop_details);
+        }
+        if (!r.ok) await parseResponse(r); // throws with the API's error message
+        let text = '', stop = null, details = null;
+        await readSSE(r, touch, (event, data) => {
+          const j = JSON.parse(data);
+          const type = j.type || event;
+          if (type === 'content_block_delta' && j.delta && j.delta.type === 'text_delta') { text += j.delta.text; onDelta(text); }
+          else if (type === 'message_delta' && j.delta) { stop = j.delta.stop_reason || stop; details = j.delta.stop_details || details; }
+          else if (type === 'error') throw new Error((j.error && j.error.message) || 'stream error');
+        });
+        return this.anthropicResult(text, stop, details);
+      } finally { done(); }
+    }
+    const body = { model: currentModel(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+    if (schema) body.response_format = { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema } };
+    if (stream) body.stream = true;
+    const { r, touch, done } = await fetchWithTimeout(this.openaiBase() + '/chat/completions', { method: 'POST', headers: this.openaiHeaders(), body: JSON.stringify(body) }, 0, signal);
+    try {
+      if (!stream) {
+        const j = await parseResponse(r);
+        const choice = (j.choices && j.choices[0]) || {};
+        const content = choice.message ? choice.message.content : '';
+        return this.openaiResult(Array.isArray(content) ? content.map((c) => c.text || '').join('') : String(content || ''), choice.finish_reason);
+      }
+      if (!r.ok) await parseResponse(r);
+      let text = '', stop = null;
+      await readSSE(r, touch, (event, data) => {
+        if (data.trim() === '[DONE]') return;
+        const j = JSON.parse(data);
+        if (j.error) throw new Error(j.error.message || 'stream error');
+        const choice = (j.choices && j.choices[0]) || {};
+        const piece = choice.delta && choice.delta.content;
+        if (typeof piece === 'string' && piece) { text += piece; onDelta(text); }
+        if (choice.finish_reason) stop = choice.finish_reason;
       });
-      const j = await parseResponse(r);
-      const choice = (j.choices && j.choices[0]) || {};
-      if (choice.finish_reason === 'content_filter') throw new Error('the model declined this request');
-      const content = choice.message ? choice.message.content : '';
-      return { text: Array.isArray(content) ? content.map((c) => c.text || '').join('') : String(content || ''), truncated: choice.finish_reason === 'length' };
-    } catch (e) { throw networkError(e); }
+      return this.openaiResult(text, stop);
+    } finally { done(); }
+  },
+  anthropicResult(text, stop, details) {
+    if (stop === 'refusal') throw new Error('the model declined this request' + (details && details.explanation ? ': ' + details.explanation : ''));
+    return { text, truncated: stop === 'max_tokens' };
+  },
+  openaiResult(text, stop) {
+    if (stop === 'content_filter') throw new Error('the model declined this request');
+    return { text, truncated: stop === 'length' };
   },
   async models() {
     try {
-      let r, j;
-      if (settings.provider === 'anthropic') {
-        r = await fetchWithTimeout('https://api.anthropic.com/v1/models?limit=100', { headers: this.anthropicHeaders() }, 20000);
-        j = await parseResponse(r);
-      } else {
-        r = await fetchWithTimeout(this.openaiBase() + '/models', { headers: this.openaiHeaders() }, 20000);
-        j = await parseResponse(r);
-      }
+      const req = settings.provider === 'anthropic'
+        ? await fetchWithTimeout(this.anthropicBase() + '/v1/models?limit=100', { headers: this.anthropicHeaders() }, 20000)
+        : await fetchWithTimeout(this.openaiBase() + '/models', { headers: this.openaiHeaders() }, 20000);
+      let j;
+      try { j = await parseResponse(req.r); } finally { req.done(); }
       const ids = (j.data || j.models || []).map((m) => m.id || m.name || m.model).filter(Boolean);
       return ids.sort((a, b) => (/gpt|claude|o\d/i.test(b) - /gpt|claude|o\d/i.test(a)) || a.localeCompare(b));
     } catch (e) { throw networkError(e); }
@@ -1393,7 +1501,7 @@ async function aiFetchQuestions() {
   const user = `PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
   // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
   // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
-  const { text: raw, truncated } = await API.chat({ system: QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low' });
+  const { text: raw, truncated } = await API.chat({ system: QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low', schema: QUESTION_SCHEMA });
   if (truncated) throw new Error('the question list was cut off at the token limit');
   const j = extractJSON(raw);
   const qs = Array.isArray(j.questions) ? j.questions : [];
@@ -1648,22 +1756,45 @@ function setPolishing(on) {
   b.disabled = on; b.innerHTML = on ? '<span class="spin"></span> Polishing…' : (state.prompt.polished ? '✦ Polish again' : '✦ Polish with AI');
   $('#tab-polished').disabled = on || !state.prompt.polished;
 }
+let polishCtl = null; // the in-flight polish, so a newer one (or a restart) can cancel it
+function cancelPolish() { if (polishCtl) { polishCtl.abort(); polishCtl = null; setPolishing(false); } }
+/** While streaming, hide an opening ``` fence so the reader sees prose, not markup, from the first token. */
+const stripOpenFence = (s) => s.replace(/^\s*```(?:markdown|md)?[ \t]*\n?/i, '');
 async function polish() {
   if (!aiEnabled()) { openSettings(); return; }
   if (!state.prompt.structured) state.prompt.structured = buildStructuredPrompt();
+  cancelPolish();
+  const ctl = (polishCtl = new AbortController());
   setPolishing(true);
+  // The reply streams straight into the view: the reader watches it arrive instead of waiting on a spinner.
+  const view = $('#prompt-view');
+  let shown = false, frame = 0, latest = '';
+  const paint = () => { frame = 0; view.innerHTML = highlightMd(latest); view.scrollTop = view.scrollHeight; };
+  const onDelta = (text) => {
+    if (ctl.signal.aborted || !$('#prompt-edit').classList.contains('hidden')) return; // never fight the editor
+    if (!shown) { shown = true; state.prompt.view = 'polished'; $('#tab-polished').classList.add('on'); $('#tab-structured').classList.remove('on'); }
+    if (state.prompt.view !== 'polished') return; // the reader switched back to the structured tab
+    latest = stripOpenFence(text);
+    if (!frame) frame = requestAnimationFrame(paint); // one repaint per frame, however fast tokens land
+  };
   try {
-    const { text: raw, truncated } = await API.chat({ system: POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000 });
+    const { text: raw, truncated } = await API.chat({ system: POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000, onDelta, signal: ctl.signal });
+    if (ctl.signal.aborted) return;
     if (!raw.trim()) throw new Error('empty response');
     state.prompt.polished = cleanMarkdown(raw);
     state.prompt.truncated = truncated; // a cut-off prompt is still useful; the result screen warns about it
     state.prompt.view = 'polished';
+    if (frame) cancelAnimationFrame(frame);
     renderResult(); saveHistory();
     toast(truncated ? 'Polished, but the model ran out of room — check the end' : 'Polished with AI ✦', truncated ? 'bad' : 'ok');
   } catch (e) {
+    if (ctl.signal.aborted) return;
     console.warn('Polish failed:', e);
     toast('Polish failed — ' + e.message, 'bad');
-  } finally { setPolishing(false); }
+    if (shown) { if (frame) cancelAnimationFrame(frame); renderResult(); } // put the structured prompt back
+  } finally {
+    if (polishCtl === ctl) { polishCtl = null; setPolishing(false); }
+  }
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
@@ -1715,6 +1846,7 @@ function saveHistory() {
 }
 function loadHistory(id) {
   const e = store.get('pf_history', []).find((x) => x.id === id); if (!e) return;
+  cancelPolish();
   resetState();
   Object.assign(state, {
     id: e.id, description: e.description || '', answers: e.answers || {}, extraQA: e.extraQA || [], asked: e.asked || [], aiQuestions: e.aiQuestions || [],
@@ -1816,10 +1948,10 @@ function init() {
   $('#edit-btn').addEventListener('click', toggleEdit);
   $('#open-claude').addEventListener('click', () => openIn('claude'));
   $('#open-chatgpt').addEventListener('click', () => openIn('chatgpt'));
-  $('#coverage').addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) askSingle(b.dataset.ask); });
-  $('#more-btn').addEventListener('click', answerMore);
+  $('#coverage').addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) { cancelPolish(); askSingle(b.dataset.ask); } });
+  $('#more-btn').addEventListener('click', () => { cancelPolish(); answerMore(); });
   $('#polish-btn').addEventListener('click', polish);
-  $('#restart-btn').addEventListener('click', () => { resetState(); $('#idea').value = ''; showScreen('describe'); $('#idea').focus(); });
+  $('#restart-btn').addEventListener('click', () => { cancelPolish(); resetState(); $('#idea').value = ''; showScreen('describe'); $('#idea').focus(); });
   $('#result-notice').addEventListener('click', (e) => { if (e.target.closest('[data-open-settings]')) openSettings(); });
 
   $('#theme-btn').addEventListener('click', () => applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
