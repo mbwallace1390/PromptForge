@@ -848,7 +848,8 @@ const DIMS = [
     delegate: 'Start with a short plan, then build the complete thing.',
   },
   {
-    id: 'skillLevel', label: 'Your experience', priority: 'important', type: 'single',
+    // Essential: for a beginner it changes every other section (explanations, deliverable, tool choice).
+    id: 'skillLevel', label: 'Your experience', priority: 'essential', type: 'single',
     question: 'How comfortable are you with code?',
     why: 'Changes how much the AI explains and how it hands things over.',
     options: ['Beginner — explain things simply', 'Some experience — I can follow along', 'Experienced developer — skip the basics'],
@@ -1343,7 +1344,7 @@ function buildStructuredPrompt() {
 /** The two sections that make or break the prompt. Written by us, and pinned back onto any AI rewrite. */
 function unspecifiedBody() {
   const unspec = unspecifiedDims();
-  return unspec.length ? `I haven't decided on: ${unspec.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result.` : '';
+  return unspec.length ? `I haven't decided on: ${unspec.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result. If anything above seems to settle one of these, treat it as open anyway; this list wins.` : '';
 }
 function rulesBody() {
   const rules = [];
@@ -1355,19 +1356,31 @@ function rulesBody() {
   rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
   return rules.map((r) => `- ${r}`).join('\n');
 }
+// Matched against headingKey(): lower-cased, markup stripped, curly quotes and dashes normalised.
 const PINNED_HEADINGS = [
-  /^#{1,6}\s*(things i (?:didn'?t|did not|haven'?t|have not) (?:specif|decid)|unspecified|not specified)/i,
-  /^#{1,6}\s*(how to work with me|working with me|how i (?:want|like|prefer) to work)/i,
+  /^(things i (?:didn'?t|did not|haven'?t|have not) (?:specif|decid)|unspecified|not specified)/,
+  /^(how to work with me|working with me|how i (?:want|like|prefer) to work)/,
 ];
 /**
  * Small models rewrite "I haven't decided on X" into decisions the person never made, pad the rules
  * with filler, and duplicate sections. So after any polish, the model's versions of these two sections
  * are removed and ours are appended, word for word.
  */
-/** Heading text without hashes or markup, normalised, so "Look & feel" and "Look and feel" collide. */
-const headingKey = (line) => line.replace(/^#{1,6}\s*/, '').replace(/[*_`:]/g, '').replace(/&/g, 'and').trim().toLowerCase();
+/** Heading text without hashes or markup, normalised, so "Look & feel", "Look and feel" and "Look‑and‑feel" collide. */
+const headingKey = (line) => line.replace(/^#{1,6}\s*/, '').replace(/[*_`:]/g, '').replace(/&/g, 'and')
+  .replace(/[‐‑‒–—]/g, '-').replace(/[‘’]/g, "'").trim().toLowerCase();
+/** Some models write every section title as a bold line ("**Must-have features**"); make those real headings. */
+function normalizeHeadings(lines) {
+  let hasTitle = lines.some((l) => /^#\s/.test(l));
+  return lines.map((l) => {
+    const m = /^\s*(?:\*\*|__)([^*_].*?)(?:\*\*|__)\s*:?\s*$/.exec(l);
+    if (!m) return l;
+    if (!hasTitle) { hasTitle = true; return `# ${m[1].trim()}`; }
+    return `## ${m[1].trim()}`;
+  });
+}
 function pinSections(text) {
-  const lines = String(text).split('\n');
+  const lines = normalizeHeadings(String(text).split('\n'));
   const kept = [];
   const seen = new Set();
   for (let i = 0; i < lines.length; i++) {
@@ -1376,7 +1389,7 @@ function pinSections(text) {
     const key = headingKey(lines[i]);
     // A filler sub-heading sprinkled under every section ("### Overview") says nothing: drop the line, keep what follows.
     if (/^(overview|summary|details?|description)$/.test(key)) continue;
-    const pinned = PINNED_HEADINGS.some((re) => re.test(lines[i]));
+    const pinned = PINNED_HEADINGS.some((re) => re.test(key));
     const duplicate = seen.has(key); // the second "## Look and feel" is a rewrite of the first, not new information
     if (!pinned && !duplicate) { seen.add(key); kept.push(lines[i]); continue; }
     // Drop from this heading up to the next heading of the same or a higher level.
@@ -1452,7 +1465,7 @@ Rules:
 - Write in the first person, as the person speaking to the AI that will build the project.
 - Keep every fact, preference and constraint they gave. Do not invent features, integrations or requirements they did not ask for. Where they said "not sure" or "let the AI decide", explicitly hand that decision to the AI and ask it to state its choice.
 - Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
-- Use this structure, and never add sub-headings such as "Overview" inside a section: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
+- Use Markdown headings ("## Section") for sections, never bold lines, and never add sub-headings such as "Overview" inside a section. Structure: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
 - Do not write a "How to work with me" section or a "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Both sections are appended afterwards exactly as the person wrote them.
 - Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
 - Output only the prompt, in Markdown.`;
@@ -2247,7 +2260,7 @@ function init() {
   // Installed as an app (from a website), the page keeps opening offline. A double-clicked file has no service worker.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
 
-  window.PromptForge = { state, DIMS, buildStructuredPrompt, settings, toList, deriveTitle, sortModels, localOriginHint, PRESETS }; // handy for debugging / customizing / tests
+  window.PromptForge = { state, DIMS, buildStructuredPrompt, settings, toList, deriveTitle, sortModels, localOriginHint, pinSections, PRESETS }; // handy for debugging / customizing / tests
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>

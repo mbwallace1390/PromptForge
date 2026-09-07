@@ -413,6 +413,15 @@ await test('Test 8: toList and deriveTitle', async () => {
     log(`  title: ${JSON.stringify(got)}`);
     check(got === want, `deriveTitle gave ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
   }
+  // A polish written with bold lines instead of headings, curly apostrophes and non-breaking hyphens (seen from a
+  // free OpenRouter model): the bold lines become headings, and its copies of the pinned sections still get stripped.
+  const bold = '**My Title**\n\nIntro line.\n\n**Must‑have features**\n1. Alpha\n\n**Things I didn’t specify**\nModel copy.\n\n**How to work with me**\n- Model rule.\n';
+  const pinned = await page.evaluate((s) => window.PromptForge.pinSections(s), bold);
+  log('  pinned bold-heading polish starts: ' + JSON.stringify(pinned.slice(0, 60)));
+  check(pinned.startsWith('# My Title\n\nIntro line.\n\n## Must‑have features\n1. Alpha'), 'bold lines were not turned into headings');
+  check(!/Model copy|Model rule/.test(pinned), "model's bold-line copies of the pinned sections were not stripped");
+  check((pinned.match(/How to work with me/g) || []).length === 1 && (pinned.match(/Things I didn't specify/g) || []).length === 1, 'pinned sections should appear exactly once');
+  check(/this list wins/.test(pinned), 'the unspecified list should declare precedence');
   await page.context().close();
 });
 
@@ -527,13 +536,15 @@ await test('Test 14: sanity hints', async () => {
   check(await skipUntil(page, /must the first version/i), 'features question not reached');
   await page.fill('#q-free', 'View series info'); await page.click('#q-next');
   check(/Only one must-have feature/.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when the single view-only feature was entered');
+  // Experience is essential now, so it comes before the important questions.
+  check(await skipUntil(page, /comfortable are you with code/i), 'experience question not reached');
+  await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next'); // Beginner
   check(await skipUntil(page, /remember anything between uses/i), 'data question not reached');
   await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next'); // "Nothing needs to be saved"
   check(/nothing needs to be saved/i.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when "nothing saved" was chosen for a catalog');
   check(await skipUntil(page, /language or tools/i), 'technology question not reached');
   await page.click('#q-chips .chip >> nth=2'); await page.fill('#q-free', 'React'); await page.click('#q-next'); // JavaScript / TypeScript + React
-  check(await skipUntil(page, /comfortable are you with code/i), 'experience question not reached');
-  await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next'); // Beginner
+  check(/named React/.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when a beginner named React');
   await skipUntil(page, /never matches/);
   await page.waitForSelector('#screen-result:not(.hidden)');
   const hints = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
