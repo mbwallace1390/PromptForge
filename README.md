@@ -8,6 +8,8 @@ Everything is in one file: `promptforge.html`. No install, no server, no build s
 
 Double-click `promptforge.html` (or drop it on any static host — GitHub Pages, Netlify, an S3 bucket, or inside an Android WebView). It works fully offline in built-in mode. Settings, past briefs, and the optional API key are saved in the browser's localStorage only.
 
+Using a local model (Ollama, LM Studio)? Those refuse a page opened straight from a file, so either double-click `PromptForge.cmd` on Windows (starts a tiny local server, minimised, and opens the app at http://localhost:5173; a shortcut to it on the desktop or Start menu makes it one click), or run `npm run serve`, or set `OLLAMA_ORIGINS=*` once and keep double-clicking the HTML file — see the Custom / local notes below for the trade-off.
+
 ## How it works
 
 1. **Describe** — the user writes what they want in their own words. Quick mode asks the ~8 most important questions; Thorough asks everything.

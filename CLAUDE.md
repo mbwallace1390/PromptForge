@@ -14,7 +14,7 @@ Single-file web app that turns a rough idea into a detailed prompt an AI coding 
   7. UI rendering & events (three screens: describe → refine → result; settings modal)
   8. History (recent briefs in localStorage)
 - `test/e2e.mjs` — Playwright suite that walks the whole flow in built-in mode and in AI mode against a mock OpenAI-compatible server on port 8787, plus the failure fallback, a stalled endpoint (timeout), a polish cut off at the model's output cap, detector/prompt-wording checks, and a phone-sized viewport. Screenshots land in `test/shots/` (git-ignored). `PF_FILE=<html>` runs the same suite against another build — use it to watch a new assertion fail on the old code before trusting it.
-- `serve.mjs` — optional zero-dependency static server (`npm run serve`, http://localhost:5173) so the page has a localhost origin; Ollama and LM Studio trust that by default and refuse the `null` origin of a double-clicked file. Not needed for built-in mode or cloud providers.
+- `serve.mjs` — optional zero-dependency static server (`npm run serve`, http://localhost:5173) so the page has a localhost origin; Ollama and LM Studio trust that by default and refuse the `null` origin of a double-clicked file. `--open` launches the browser; a second launch on a busy port just opens the browser and exits. `PromptForge.cmd` is the double-click wrapper for Windows (`start /min node serve.mjs --open`). Not needed for built-in mode or cloud providers.
 - `README.md` — user-facing docs.
 
 ## Conventions
