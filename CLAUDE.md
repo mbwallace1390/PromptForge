@@ -14,6 +14,7 @@ Single-file web app that turns a rough idea into a detailed prompt an AI coding 
   7. UI rendering & events (three screens: describe → refine → result; settings modal)
   8. History (recent briefs in localStorage)
 - `test/e2e.mjs` — Playwright suite that walks the whole flow in built-in mode and in AI mode against a mock OpenAI-compatible server on port 8787, plus the failure fallback, a stalled endpoint (timeout), a polish cut off at the model's output cap, detector/prompt-wording checks, and a phone-sized viewport. Screenshots land in `test/shots/` (git-ignored). `PF_FILE=<html>` runs the same suite against another build — use it to watch a new assertion fail on the old code before trusting it.
+- `serve.mjs` — optional zero-dependency static server (`npm run serve`, http://localhost:5173) so the page has a localhost origin; Ollama and LM Studio trust that by default and refuse the `null` origin of a double-clicked file. Not needed for built-in mode or cloud providers.
 - `README.md` — user-facing docs.
 
 ## Conventions
@@ -28,7 +29,7 @@ Single-file web app that turns a rough idea into a detailed prompt an AI coding 
 ## Working on it
 
 - Open `promptforge.html` in a browser to run it. `window.PromptForge` exposes `state`, `DIMS`, `buildStructuredPrompt`, `settings`, `toList`, and `deriveTitle` in the console (the last two so the test can drive them directly).
-- `API.chat` resolves to `{ text, truncated }` and takes optional `effort` (Claude only), `schema` (structured outputs on Claude, `response_format` elsewhere; a `custom` server answering 400/422 gets one retry without it), `onDelta` (stream the reply; both providers' SSE shapes are parsed by `readSSE`), and `signal`. Every request goes through `fetchWithTimeout` (`settings.apiTimeoutMs`, default 45 s, renewed while a stream delivers); a stalled call must fall back, never hang the interview. `polish()` streams into `#prompt-view` and is cancelled by `cancelPolish()` on restart, history load, or a new question.
+- `API.chat` resolves to `{ text, truncated }` and takes optional `effort` (Claude only), `schema` (structured outputs on Claude, `response_format` elsewhere; a `custom` server answering 400/422 gets one retry without it), `onDelta` (stream the reply; both providers' SSE shapes are parsed by `readSSE`), and `signal`. Every request goes through `fetchWithTimeout` (`settings.apiTimeoutMs`, or by default 60 s for cloud and 180 s for `custom` because a local model's first call includes loading it — measured 33 s for a 7B on a laptop GPU; renewed while a stream delivers); a stalled call must fall back, never hang the interview. `polish()` streams into `#prompt-view` and is cancelled by `cancelPolish()` on restart, history load, or a new question.
 - `settings.anthropicBase` (default `https://api.anthropic.com`) exists so the test can point the Claude path at the mock server's `/anthropic` routes; it is not in the settings UI.
 - `npm install` once (installs Playwright and its Chromium), then `npm test` after changes. The only expected console error in the test output is `ERR_UNSAFE_PORT` from the deliberate failure test.
 - When the interview flow changes, update `answerLoop()` in the test so it still answers every question type.

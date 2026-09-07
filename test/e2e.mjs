@@ -252,6 +252,11 @@ await test('Test 3: AI mode (mock server)', async () => {
   await page.click('#s-fetch-models');
   await page.waitForFunction(() => /models loaded/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
   log('  ' + (await page.$eval('#s-test-result', (el) => el.textContent)));
+  // A base URL typed without a scheme must still work (and be shown normalised), not fail as a relative path.
+  await page.fill('#s-baseurl', 'localhost:8787/v1');
+  await page.click('#s-fetch-models');
+  await page.waitForFunction(() => /models loaded|Could not/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
+  check((await page.$eval('#s-baseurl', (el) => el.value)) === 'http://localhost:8787/v1' && /models loaded/.test(await page.$eval('#s-test-result', (el) => el.textContent)), 'base URL without a scheme was not normalised');
   await page.click('#s-test');
   await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
   const testResult = await page.$eval('#s-test-result', (el) => el.textContent);

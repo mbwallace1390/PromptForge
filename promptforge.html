@@ -465,7 +465,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
       <div class="field" id="field-baseurl">
         <label for="s-baseurl">API base URL (OpenAI-compatible)</label>
         <input id="s-baseurl" type="url" placeholder="http://localhost:11434/v1">
-        <div class="help">Works with Ollama, LM Studio, OpenRouter, Groq and anything that speaks the OpenAI chat format. For Ollama, start it with <code>OLLAMA_ORIGINS=*</code> so the browser is allowed to call it.</div>
+        <div class="help">Works with Ollama, LM Studio, OpenRouter, Groq and anything that speaks the OpenAI chat format. For a local server, open this page through <code>http://localhost</code> (run <code>npm run serve</code> in the PromptForge folder) rather than double-clicking the file: local servers trust localhost pages but refuse a <code>file://</code> page. Or start Ollama with <code>OLLAMA_ORIGINS=*</code>.</div>
       </div>
       <div class="field" id="field-key">
         <label for="s-key">API key</label>
@@ -568,9 +568,10 @@ const DEFAULT_MODELS = {
   custom: ['llama3.1', 'qwen2.5-coder', 'mistral'],
 };
 const settings = Object.assign(
-  { provider: 'none', apiKey: '', model: '', baseUrl: 'http://localhost:11434/v1', autoPolish: true, depth: 'quick', apiTimeoutMs: 45000 },
+  { provider: 'none', apiKey: '', model: '', baseUrl: 'http://localhost:11434/v1', autoPolish: true, depth: 'quick', apiTimeoutMs: 0 },
   store.get('pf_settings', {})
 );
+if (settings.apiTimeoutMs === 45000) settings.apiTimeoutMs = 0; // saved by an earlier build as a fixed default; 0 = provider-aware default
 function saveSettings() { store.set('pf_settings', settings); refreshAiBadge(); }
 function aiEnabled() {
   if (settings.provider === 'none') return false;
@@ -1324,9 +1325,15 @@ function networkError(e) {
  * one is not. A stalled request must never leave the interview stuck behind a spinner.
  * Resolves to { r, touch, done }: call touch() as chunks arrive, done() when finished with the body.
  */
+/**
+ * How long to wait for a reply before giving up. A local server has to load the model into memory
+ * on its first call — measured 33 s for a 7B model on a laptop GPU — and a non-streaming reply sends
+ * nothing until it is finished, so local gets three minutes; cloud APIs fail fast or not at all.
+ */
+function apiTimeoutMs() { return settings.apiTimeoutMs || (settings.provider === 'custom' ? 180000 : 60000); }
 async function fetchWithTimeout(url, init, ms, signal) {
   const ctl = new AbortController();
-  const limit = ms || settings.apiTimeoutMs || 45000;
+  const limit = ms || apiTimeoutMs();
   let timer = setTimeout(() => ctl.abort(), limit);
   const touch = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), limit); };
   const done = () => clearTimeout(timer);
@@ -1625,7 +1632,9 @@ async function advance() {
   if (i >= 0 && i < state.asked.length - 1) { showQuestion(state.asked[i + 1]); return; } // walking forward after "Back"
   let id = nextQuestionId();
   if (!id && state.aiMode && !state.aiDone) {
-    showThinking(state.aiRound === 0 ? 'Reading your idea and working out what to ask…' : 'Checking whether anything important is still missing…');
+    showThinking(state.aiRound === 0
+      ? (settings.provider === 'custom' ? 'Reading your idea and working out what to ask… (a local model can take a minute to load the first time)' : 'Reading your idea and working out what to ask…')
+      : 'Checking whether anything important is still missing…');
     try {
       const qs = await aiFetchQuestions();
       state.aiRound++;
@@ -1897,8 +1906,18 @@ function renderSettings() {
     : p === 'openai' ? 'Uses the OpenAI API directly from this page. Get a key at platform.openai.com.'
     : 'Any OpenAI-compatible server: Ollama, LM Studio, OpenRouter, Groq, etc.';
 }
+/** "localhost:11434/v1" typed without a scheme would be fetched as a relative path and fail silently. */
+const withScheme = (u) => (u && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? 'http://' + u : u);
+/** When a local-server call fails from a file:// page, the cause is almost always the null origin. */
+function localOriginHint() {
+  const base = draft.provider === 'custom' ? draft.baseUrl : '';
+  return location.protocol === 'file:' && /^https?:\/\/(localhost|127\.0\.0\.1)\b/i.test(base)
+    ? ' This page is opened as a file, and local servers refuse that. Run "npm run serve" in the PromptForge folder and open http://localhost:5173 instead.'
+    : '';
+}
 function readSettingsForm() {
-  draft.baseUrl = $('#s-baseurl').value.trim();
+  draft.baseUrl = withScheme($('#s-baseurl').value.trim());
+  $('#s-baseurl').value = draft.baseUrl;
   draft.apiKey = $('#s-key').value.trim();
   draft.model = $('#s-model').value.trim();
   draft.autoPolish = $('#s-autopolish').checked;
@@ -1970,16 +1989,16 @@ function init() {
       $('#model-list').innerHTML = ids.map((m) => `<option value="${esc(m)}">`).join('');
       $('#s-test-result').textContent = `${ids.length} models loaded — start typing in the model box to pick one.`;
       if (!$('#s-model').value && ids.length) $('#s-model').value = ids[0];
-    } catch (e) { $('#s-test-result').textContent = 'Could not fetch models: ' + e.message; }
+    } catch (e) { $('#s-test-result').textContent = 'Could not fetch models: ' + e.message + localOriginHint(); }
     finally { btn.disabled = false; btn.textContent = 'Fetch list'; }
   });
   $('#s-test').addEventListener('click', async () => {
-    const out = $('#s-test-result'); out.textContent = 'Testing…';
+    const out = $('#s-test-result'); out.textContent = 'Testing…' + (draft.provider === 'custom' ? ' (a local model can take a minute to load the first time)' : '');
     try {
       // Room for thinking tokens, which count against the cap; at 20 the reply itself could be empty.
       const { text: reply } = await withTempSettings(() => API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 200, effort: 'low' }));
       out.textContent = 'Connected ✓ (model replied: ' + reply.trim().slice(0, 40) + ')';
-    } catch (e) { out.textContent = 'Failed: ' + e.message; }
+    } catch (e) { out.textContent = 'Failed: ' + e.message + localOriginHint(); }
   });
   $('#settings-save').addEventListener('click', () => {
     readSettingsForm();
