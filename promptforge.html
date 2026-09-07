@@ -1540,25 +1540,27 @@ const API = {
    * - onDelta(textSoFar): stream the reply and call this as it grows.
    * - signal: caller-side cancellation.
    */
-  async chat({ system, user, maxTokens = 16000, effort, schema, onDelta, signal }) {
-    try {
-      return await this.chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal });
-    } catch (e) {
-      const msg = String(e && e.message);
-      // A local / OpenAI-compatible server may not know response_format. Ask once more without it —
-      // the tolerant JSON parser downstream still copes with a plain-text reply.
-      if (schema && settings.provider === 'custom' && /^(400|422)\b/.test(msg)) {
-        try { return await this.chatOnce({ system, user, maxTokens, effort, onDelta, signal }); } catch (e2) { throw networkError(e2); }
+  async chat(opts) {
+    const o = { maxTokens: 16000, ...opts };
+    // Each recovery below fires at most once, so this ends within four attempts.
+    for (;;) {
+      try {
+        return await this.chatOnce(o);
+      } catch (e) {
+        const msg = String(e && e.message);
+        if (o.signal && o.signal.aborted) throw networkError(e);
+        // The service rejected the fallback chain (its limits change): ask again without it.
+        if (!o.noChain && /^400\b/.test(msg) && /models/i.test(msg)) { o.noChain = true; continue; }
+        // A local / OpenAI-compatible server may not know response_format. Ask again without it —
+        // the tolerant JSON parser downstream still copes with a plain-text reply.
+        if (o.schema && settings.provider === 'custom' && /^(400|422)\b/.test(msg)) { delete o.schema; continue; }
+        // Free tiers rate-limit in bursts; a short pause and one more try clears most of them.
+        if (/^429\b/.test(msg) && !o.retried429) { o.retried429 = true; await new Promise((r) => setTimeout(r, 1500)); continue; }
+        throw networkError(e);
       }
-      // Free tiers rate-limit in bursts; a short pause and one more try clears most of them.
-      if (/^429\b/.test(msg) && !(signal && signal.aborted)) {
-        await new Promise((r) => setTimeout(r, 1500));
-        try { return await this.chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal }); } catch (e2) { throw networkError(e2); }
-      }
-      throw networkError(e);
     }
   },
-  async chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal }) {
+  async chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal, noChain }) {
     const stream = typeof onDelta === 'function';
     if (settings.provider === 'anthropic') {
       const body = { model: currentModel(), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] };
@@ -1588,9 +1590,10 @@ const API = {
     if (schema) body.response_format = { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema } };
     if (stream) body.stream = true;
     // OpenRouter moves on to the next listed model when one is rate-limited or down (its "models" routing
-    // parameter). Free models are shared and busy in bursts, so the other free ones from Fetch list stand in.
-    if (settings.provider === 'custom' && settings.preset === 'openrouter' && Array.isArray(settings.freeModels)) {
-      const chain = [body.model, ...settings.freeModels.filter((m) => m !== body.model)].slice(0, 5);
+    // parameter, at most 3 entries). Free models are shared and busy in bursts, so two other free ones
+    // from Fetch list stand in.
+    if (!noChain && settings.provider === 'custom' && settings.preset === 'openrouter' && Array.isArray(settings.freeModels)) {
+      const chain = [body.model, ...settings.freeModels.filter((m) => m !== body.model)].slice(0, 3);
       if (chain.length > 1) body.models = chain;
     }
     const { r, touch, done } = await fetchWithTimeout(this.openaiBase() + '/chat/completions', { method: 'POST', headers: this.openaiHeaders(), body: JSON.stringify(body) }, 0, signal);

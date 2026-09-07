@@ -68,6 +68,11 @@ const server = http.createServer((req, res) => {
     const sys = anthropic ? String(j.system || '') : (j.messages?.[0]?.content || '');
     const user = anthropic ? (j.messages?.[0]?.content || '') : (j.messages?.[1]?.content || '');
     mockCalls.push({ url: req.url, sys: sys.slice(0, 40), user, body: j });
+    // OpenRouter's real limit on its fallback list, and a server that rejects the list outright.
+    if (!anthropic && Array.isArray(j.models) && (j.models.length > 3 || j.model === 'mock-nochain')) {
+      res.writeHead(400, { ...cors, 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: "'models' array must have 3 items or fewer." } }));
+    }
     // A busy free model: 429 on the first call, fine on the next — the app must pause and retry once.
     if (!anthropic && j.model === 'mock-429' && !mockCalls.slice(0, -1).some((c) => c.body.model === 'mock-429')) {
       res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
@@ -629,7 +634,16 @@ await test('Test 18: OpenRouter fallback chain', async () => {
   await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 8000 });
   const call = mockCalls.find((c) => /connectivity/.test(c.sys));
   log('  models sent: ' + JSON.stringify(call && call.body.models));
-  check(call && call.body.model === 'a:free' && JSON.stringify(call.body.models) === JSON.stringify(['a:free', 'b:free', 'c:free', 'd:free', 'e:free']), 'OpenRouter request should carry the chosen model plus up to four free fallbacks');
+  check(call && call.body.model === 'a:free' && JSON.stringify(call.body.models) === JSON.stringify(['a:free', 'b:free', 'c:free']), 'OpenRouter request should carry the chosen model plus two free fallbacks (its limit is 3)');
+  check(/Connected ✓/.test(await page.$eval('#s-test-result', (el) => el.textContent)), 'a 3-item chain must be accepted');
+  // A service that rejects the chain gets one more call without it.
+  mockCalls = [];
+  await page.fill('#s-model', 'mock-nochain');
+  await page.click('#s-test');
+  await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 8000 });
+  const tries = mockCalls.filter((c) => /connectivity/.test(c.sys));
+  log(`  chain rejected: ${tries.length} calls, second has models: ${tries[1] && 'models' in tries[1].body}`);
+  check(tries.length === 2 && 'models' in tries[0].body && !('models' in tries[1].body) && /Connected ✓/.test(await page.$eval('#s-test-result', (el) => el.textContent)), 'a rejected chain should be retried without it');
   // Fetch list refreshes the remembered free models (mock returns none), and a non-OpenRouter preset sends no chain.
   await page.click('#s-fetch-models');
   await page.waitForFunction(() => /models loaded|Could not/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
