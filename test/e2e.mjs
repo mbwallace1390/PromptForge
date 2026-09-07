@@ -68,6 +68,11 @@ const server = http.createServer((req, res) => {
     const sys = anthropic ? String(j.system || '') : (j.messages?.[0]?.content || '');
     const user = anthropic ? (j.messages?.[0]?.content || '') : (j.messages?.[1]?.content || '');
     mockCalls.push({ url: req.url, sys: sys.slice(0, 40), user, body: j });
+    // A wrong or missing key: the service's own wording is unhelpful, the app must say what to do.
+    if (!anthropic && j.model === 'mock-401') {
+      res.writeHead(401, { ...cors, 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'No cookie auth credentials found' } }));
+    }
     // A local server that has never heard of response_format answers 400 — the app must retry without it.
     if (!anthropic && j.model === 'mock-noschema' && j.response_format) {
       res.writeHead(400, { ...cors, 'Content-Type': 'application/json' });
@@ -576,12 +581,29 @@ await test('Test 16: presets', async () => {
   log(`  default preset: ${shown} -> ${url0}`);
   check(shown === 'openrouter' && url0 === 'https://openrouter.ai/api/v1', 'a fresh install should default to OpenRouter (free models)');
   check(/no card needed/.test(await page.$eval('#preset-help', (el) => el.textContent)) && (await page.$eval('#preset-help a', (el) => el.href)) === 'https://openrouter.ai/keys', 'OpenRouter help or key link missing');
+  // OpenRouter lists its models without a key, so the app must keep saying a key is still needed.
+  await page.click('#s-test');
+  check(/OpenRouter needs a key/.test(await page.$eval('#s-test-result', (el) => el.textContent)), 'Test connection without a key should explain, not call the service');
+  await page.click('#settings-save');
+  check(/OpenRouter needs a key/.test(await page.$eval('#toast', (el) => el.textContent)), 'Save without a key should explain');
+  check(/Required — paste the whole key/.test(await page.$eval('#key-help', (el) => el.textContent)), 'key help should say the key is required for a cloud service');
   await page.selectOption('#s-preset', 'ollama');
   check((await page.$eval('#s-baseurl', (el) => el.value)) === 'http://localhost:11434/v1', 'Ollama preset did not fill its address');
+  check(/Not needed for a server on this computer/.test(await page.$eval('#key-help', (el) => el.textContent)), 'key help should say no key is needed for a local server');
   await page.selectOption('#s-preset', 'gemini');
   check((await page.$eval('#s-baseurl', (el) => el.value)) === 'https://generativelanguage.googleapis.com/v1beta/openai', 'Gemini preset did not fill its address');
   await page.fill('#s-key', 'k'); await page.click('#settings-save');
   check((await page.$eval('#ai-badge-text', (el) => el.textContent)) === 'AI: Gemini', 'badge should name the chosen service');
+  // A rejected key reads as advice, not as the service's internal wording.
+  await page.click('#settings-btn');
+  await page.selectOption('#s-preset', 'other');
+  await page.fill('#s-baseurl', 'http://localhost:8787/v1'); await page.fill('#s-model', 'mock-401'); await page.fill('#s-key', 'wrong');
+  await page.click('#s-test');
+  await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
+  const rejected = await page.$eval('#s-test-result', (el) => el.textContent);
+  log('  401 reads as: ' + rejected);
+  check(/Failed: 401 the service rejected the key/.test(rejected) && !/PromptForge\.cmd/.test(rejected), 'a 401 should be explained in plain words, without the unreachable-server hint');
+  await page.click('#settings-cancel');
   const sorted = await page.evaluate(() => window.PromptForge.sortModels(['zeta', 'alpha:free', 'gpt-x', 'beta:free'], 'openrouter'));
   log('  sortModels: ' + sorted.join(', '));
   check(sorted.join(',') === 'alpha:free,beta:free,gpt-x,zeta', 'free models should come first, then well-known families');

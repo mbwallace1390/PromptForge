@@ -477,7 +477,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
       <div class="field" id="field-baseurl">
         <label for="s-baseurl">API base URL (OpenAI-compatible)</label>
         <input id="s-baseurl" type="url" placeholder="http://localhost:11434/v1">
-        <div class="help">Works with Ollama, LM Studio, OpenRouter, Groq and anything that speaks the OpenAI chat format. For a local server, open this page through <code>http://localhost</code> (run <code>npm run serve</code> in the PromptForge folder) rather than double-clicking the file: local servers trust localhost pages but refuse a <code>file://</code> page. Or start Ollama with <code>OLLAMA_ORIGINS=*</code>.</div>
+        <div class="help">Filled in by the service above. Change it only for "Other".</div>
       </div>
       <div class="field" id="field-key">
         <label for="s-key">API key</label>
@@ -485,7 +485,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
           <input id="s-key" type="password" autocomplete="off" placeholder="sk-…">
           <button class="btn sm" id="s-key-toggle" type="button">Show</button>
         </div>
-        <div class="help">Stored only in this browser (localStorage) and sent only to the provider you chose. Don't use this on a shared computer.</div>
+        <div class="help" id="key-help">Stored only in this browser (localStorage) and sent only to the provider you chose. Don't use this on a shared computer.</div>
       </div>
       <div class="field">
         <label for="s-model">Model</label>
@@ -585,11 +585,11 @@ const DEFAULT_MODELS = {
  * they change too often, and "Fetch list" asks the service for the current ones.
  */
 const PRESETS = [
-  { id: 'openrouter', short: 'OpenRouter', label: 'OpenRouter — free models available', baseUrl: 'https://openrouter.ai/api/v1', keyUrl: 'https://openrouter.ai/keys', freeFirst: true,
+  { id: 'openrouter', short: 'OpenRouter', label: 'OpenRouter — free models available', baseUrl: 'https://openrouter.ai/api/v1', keyUrl: 'https://openrouter.ai/keys', freeFirst: true, needsKey: true,
     help: 'Sign up, create a key (no card needed), paste it below, then Fetch list and pick a model ending in ":free". Free models are rate-limited but fine for a brief.' },
-  { id: 'groq', short: 'Groq', label: 'Groq — free tier', baseUrl: 'https://api.groq.com/openai/v1', keyUrl: 'https://console.groq.com/keys',
+  { id: 'groq', short: 'Groq', label: 'Groq — free tier', baseUrl: 'https://api.groq.com/openai/v1', keyUrl: 'https://console.groq.com/keys', needsKey: true,
     help: 'Sign up, create a key (no card needed), paste it below, then Fetch list. Very fast; the free tier has daily limits.' },
-  { id: 'gemini', short: 'Gemini', label: 'Google AI Studio — free tier', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyUrl: 'https://aistudio.google.com/apikey',
+  { id: 'gemini', short: 'Gemini', label: 'Google AI Studio — free tier', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyUrl: 'https://aistudio.google.com/apikey', needsKey: true,
     help: 'Sign in with a Google account, create a key (no card needed), paste it below, then Fetch list.' },
   { id: 'ollama', short: 'Ollama', label: 'Ollama — runs on this computer', baseUrl: 'http://localhost:11434/v1',
     help: 'Free and offline, needs a decent computer. Install Ollama, run "ollama pull qwen2.5:7b" in a terminal, then Fetch list. No key needed.' },
@@ -1462,7 +1462,11 @@ async function parseResponse(r) {
   let j = null; try { j = JSON.parse(text); } catch { /* not json */ }
   if (!r.ok) {
     const msg = (j && j.error && (j.error.message || j.error)) || (j && j.message) || text.slice(0, 200) || r.statusText;
-    throw new Error(`${r.status} ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
+    // The status code is what a person can act on; the service's own text ("No cookie auth credentials found") rarely is.
+    const why = r.status === 401 || r.status === 403 ? 'the service rejected the key — check that a key is pasted and copied whole. '
+      : r.status === 429 ? 'rate limit reached — wait a minute or pick another model. '
+      : r.status === 404 ? 'no such model or address — press Fetch list and pick a model from it. ' : '';
+    throw new Error(`${r.status} ${why}${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
   }
   if (!j) throw new Error('The API returned something that is not JSON.');
   return j;
@@ -2058,6 +2062,8 @@ function renderSettings() {
     $('#s-preset').value = preset.id;
     $('#preset-help').innerHTML = esc(preset.help) + (preset.keyUrl ? ` <a href="${esc(preset.keyUrl)}" target="_blank" rel="noopener">Get a key ↗</a>` : '');
   }
+  $('#key-help').textContent = (p === 'custom' && !keyNeeded() ? 'Not needed for a server on this computer. ' : 'Required — paste the whole key. ')
+    + "Stored only in this browser (localStorage) and sent only to the provider you chose. Don't use this on a shared computer.";
   $('#s-baseurl').value = draft.baseUrl || '';
   $('#s-key').value = draft.apiKey || '';
   $('#s-model').value = draft.model || '';
@@ -2073,6 +2079,15 @@ function renderSettings() {
     : p === 'openai' ? 'Uses the OpenAI API directly from this page. Get a key at platform.openai.com.'
     : 'Services with a free tier, or a model running on this computer. Nothing here costs money unless you choose a paid model.';
 }
+/** Whether the draft provider cannot work without a key (cloud services), as opposed to a server on this computer. */
+function keyNeeded() {
+  if (draft.provider === 'anthropic' || draft.provider === 'openai') return true;
+  return draft.provider === 'custom' && !!(PRESET_BY_ID[draft.preset] || {}).needsKey;
+}
+function keyMissingMessage() {
+  const name = draft.provider === 'anthropic' ? 'Claude' : draft.provider === 'openai' ? 'OpenAI' : (PRESET_BY_ID[draft.preset] || PRESET_BY_ID.other).short;
+  return `${name} needs a key: use "Get a key" above, paste it into the API key box, then try again.`;
+}
 /** "localhost:11434/v1" typed without a scheme would be fetched as a relative path and fail silently. */
 const withScheme = (u) => (u && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? 'http://' + u : u);
 /**
@@ -2087,6 +2102,8 @@ function localOriginHint(loc = location, base = draft.provider === 'custom' ? dr
   if (!isLocal(loc.origin)) return ` Ollama must allow this website: in cmd run  setx OLLAMA_ORIGINS "${loc.origin}"  then quit Ollama from the tray and start it again. LM Studio: turn on CORS in its server settings.`;
   return '';
 }
+/** The origin explanation applies only when the server could not be reached at all; a 401 means it answered. */
+const failureHint = (e) => (/couldn'?t reach the API/.test(String(e && e.message)) ? localOriginHint() : '');
 function readSettingsForm() {
   draft.preset = $('#s-preset').value || draft.preset;
   draft.baseUrl = withScheme($('#s-baseurl').value.trim());
@@ -2177,23 +2194,28 @@ function init() {
       const ids = sortModels(await withTempSettings(() => API.models()), draft.provider === 'custom' ? draft.preset : '');
       $('#model-list').innerHTML = ids.map((m) => `<option value="${esc(m)}">`).join('');
       const free = ids.filter((m) => /:free$/i.test(m)).length;
-      $('#s-test-result').textContent = `${ids.length} models loaded${free ? `, ${free} free (ending in ":free")` : ''} — start typing in the model box to pick one.`;
+      // Some services publish their model list without a key, so a successful fetch must not read as "connected".
+      $('#s-test-result').textContent = `${ids.length} models loaded${free ? `, ${free} free (ending in ":free")` : ''} — start typing in the model box to pick one.`
+        + (keyNeeded() && !draft.apiKey ? ' Now paste your key above, then Test connection.' : '');
       if (!$('#s-model').value && ids.length) $('#s-model').value = ids[0];
-    } catch (e) { $('#s-test-result').textContent = 'Could not fetch models: ' + e.message + localOriginHint(); }
+    } catch (e) { $('#s-test-result').textContent = 'Could not fetch models: ' + e.message + failureHint(e); }
     finally { btn.disabled = false; btn.textContent = 'Fetch list'; }
   });
   $('#s-test').addEventListener('click', async () => {
-    const out = $('#s-test-result'); out.textContent = 'Testing…' + (draft.provider === 'custom' ? ' (a local model can take a minute to load the first time)' : '');
+    const out = $('#s-test-result');
+    readSettingsForm();
+    if (keyNeeded() && !draft.apiKey) { out.textContent = keyMissingMessage(); return; }
+    out.textContent = 'Testing…' + (draft.provider === 'custom' && !keyNeeded() ? ' (a local model can take a minute to load the first time)' : '');
     try {
       // Room for thinking tokens, which count against the cap; at 20 the reply itself could be empty.
       const { text: reply } = await withTempSettings(() => API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 200, effort: 'low' }));
       out.textContent = 'Connected ✓ (model replied: ' + reply.trim().slice(0, 40) + ')';
-    } catch (e) { out.textContent = 'Failed: ' + e.message + localOriginHint(); }
+    } catch (e) { out.textContent = 'Failed: ' + e.message + failureHint(e); }
   });
   $('#settings-save').addEventListener('click', () => {
     readSettingsForm();
     if (draft.provider === 'custom' && !/^https?:\/\//i.test(draft.baseUrl)) { toast('Enter a base URL that starts with http:// or https://', 'bad'); return; }
-    if ((draft.provider === 'anthropic' || draft.provider === 'openai') && !draft.apiKey) { toast('Add an API key, or choose "Off"', 'bad'); return; }
+    if (keyNeeded() && !draft.apiKey) { toast(keyMissingMessage(), 'bad', 6000); return; }
     Object.assign(settings, draft); saveSettings(); closeSettings();
     toast(aiEnabled() ? 'AI assistance is on' : 'Built-in mode', 'ok');
     if (state.screen === 'result') renderResult();
