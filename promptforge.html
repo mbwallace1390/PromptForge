@@ -531,12 +531,12 @@ const wordCount = (s) => (String(s || '').trim().match(/\S+/g) || []).length;
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
 
 let toastTimer;
-function toast(msg, kind = '') {
+function toast(msg, kind = '', ms = 3200) {
   const el = $('#toast');
   el.textContent = msg;
   el.className = 'show ' + kind;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = ''; }, 3200);
+  toastTimer = setTimeout(() => { el.className = ''; }, ms);
 }
 
 const store = {
@@ -1121,23 +1121,44 @@ const viaAi = (a) => !!(a && a.via === 'ai');
 /** An AI option on its own ("No, just for the current session") is ambiguous; keep the question it answered. */
 const aiQuoted = (a) => answerText(a) + (a.q ? ` (my answer to: "${a.q}")` : '');
 
+/**
+ * What the data answer means — from our chips or from an AI option's own wording ("No, it's okay if
+ * data is lost between uses"). Only the chosen option is classified, never the free text, which may
+ * mention logins while the choice says local. Returns none | local | online | unsure | other.
+ */
+function dataMode(a) {
+  if (!hasContent(a)) return null;
+  if (a.source === 'delegate') return 'unsure';
+  const t = a.choices && a.choices.length ? a.choices.join(' ') : answerText(a);
+  if (/\b(not sure|recommend|you decide|whatever)\b/i.test(t)) return 'unsure';
+  if ((/^\s*no,/i.test(t) || /\b(nothing|no need|not needed|none|stateless|temporary|lost|forgotten|cleared|reset|current session|doesn'?t need|don'?t need|not (?:have|need) to (?:save|remember|store))\b/i.test(t))
+    && !/\b(but|except|keep|remember|history)\b/i.test(t)) return 'none';
+  if (/\b(online|accounts?|sign ?in|log ?in|sync|cloud|server|multi-?device|between devices)\b/i.test(t) && !/\bno (?:accounts?|log ?in|sign ?in)\b/i.test(t)) return 'online';
+  if (/\b(device only|locally|local|on the device|this device|offline|browser storage|on my (?:phone|computer|laptop))\b/i.test(t)) return 'local';
+  return 'other';
+}
+const DATA_SENTENCES = {
+  none: 'Nothing needs to persist between sessions — keep it stateless and simple.',
+  local: 'Data is saved locally on the device — no accounts and no server. Choose a simple, reliable local storage method and make sure data survives restarts and updates.',
+  online: 'Data is saved online with user accounts so it can be used from more than one device. Keep sign-in simple and secure, and tell me which backend or service you would use and why.',
+};
 function dataBody() {
   if (delegated('data')) return delegateLine('data');
   const a = state.answers.data; if (!hasContent(a)) return '';
-  if (viaAi(a)) return aiQuoted(a);
+  const mode = dataMode(a);
+  if (viaAi(a)) return DATA_SENTENCES[mode] ? `${DATA_SENTENCES[mode]} (I answered: "${answerText(a)}".)` : aiQuoted(a);
   const c = (a.choices || []).join(' ');
-  let s = '';
-  if (/nothing/i.test(c)) s = 'Nothing needs to persist between sessions — keep it stateless and simple.';
-  else if (/device only|locally|local/i.test(c)) s = 'Data is saved locally on the device — no accounts and no server. Choose a simple, reliable local storage method and make sure data survives restarts and updates.';
-  else if (/online|accounts?|sync|cloud/i.test(c)) s = 'Data is saved online with user accounts so it can be used from more than one device. Keep sign-in simple and secure, and tell me which backend or service you would use and why.';
-  else if (/not sure|recommend/i.test(c)) s = delegateLine('data');
-  else if (c) s = c + '.';
+  let s = DATA_SENTENCES[mode] || (mode === 'unsure' ? delegateLine('data') : c ? c + '.' : '');
   if (a.text && a.text.trim()) s += (s ? ' ' : '') + a.text.trim();
   return s;
 }
+/** A beginner who never said what they want back gets the consultant's default: the simplest thing that runs. */
+const BEGINNER_DELIVERABLE = "I'm new to this, so give me the simplest thing that runs: a single file if that's realistic, otherwise a very small project, with exact steps to set it up and run it.";
+const isBeginner = () => !delegated('skillLevel') && has(val('skillLevel'), BEGINNER_RE);
+const beginnerDeliverable = () => isBeginner() && dimStatus('deliverable') === 'missing';
 function deliverableBody() {
   if (delegated('deliverable')) return delegateLine('deliverable');
-  const t = val('deliverable'); if (!t) return '';
+  const t = val('deliverable'); if (!t) return beginnerDeliverable() ? BEGINNER_DELIVERABLE : '';
   if (viaAi(state.answers.deliverable)) return aiQuoted(state.answers.deliverable);
   if (has(t, /single file/i)) return 'A single self-contained file I can open or run immediately, with no build step if at all possible.';
   if (has(t, /plan first|then the code/i)) return 'First, a short build plan (architecture, files, order of work). Once I confirm it, the complete code.';
@@ -1213,6 +1234,7 @@ function unspecifiedDims() {
   return DIMS.filter((d) => {
     if (d.when && !d.when(state)) return false;
     if (['name', 'niceToHave', 'outOfScope', 'successCriteria', 'purpose'].includes(d.id)) return false;
+    if (d.id === 'deliverable' && beginnerDeliverable()) return false; // covered by the beginner default
     const s = dimStatus(d.id);
     return s === 'missing' || s === 'skipped';
   });
@@ -1301,17 +1323,26 @@ const PINNED_HEADINGS = [
  * with filler, and duplicate sections. So after any polish, the model's versions of these two sections
  * are removed and ours are appended, word for word.
  */
+/** Heading text without hashes or markup, normalised, so "Look & feel" and "Look and feel" collide. */
+const headingKey = (line) => line.replace(/^#{1,6}\s*/, '').replace(/[*_`:]/g, '').replace(/&/g, 'and').trim().toLowerCase();
 function pinSections(text) {
   const lines = String(text).split('\n');
   const kept = [];
+  const seen = new Set();
   for (let i = 0; i < lines.length; i++) {
     const h = /^(#{1,6})\s/.exec(lines[i]);
-    if (!h || !PINNED_HEADINGS.some((re) => re.test(lines[i]))) { kept.push(lines[i]); continue; }
+    if (!h) { kept.push(lines[i]); continue; }
+    const key = headingKey(lines[i]);
+    // A filler sub-heading sprinkled under every section ("### Overview") says nothing: drop the line, keep what follows.
+    if (/^(overview|summary|details?|description)$/.test(key)) continue;
+    const pinned = PINNED_HEADINGS.some((re) => re.test(lines[i]));
+    const duplicate = seen.has(key); // the second "## Look and feel" is a rewrite of the first, not new information
+    if (!pinned && !duplicate) { seen.add(key); kept.push(lines[i]); continue; }
     // Drop from this heading up to the next heading of the same or a higher level.
     const level = h[1].length;
     while (i + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[i + 1]); if (n && n[1].length <= level) break; i++; }
   }
-  const body = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const body = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim().replace(/(\n\s*(?:-{3,}|\*{3,}|_{3,})\s*)+$/, '').trim(); // no dangling rule line
   return (body + '\n\n' + section("Things I didn't specify", unspecifiedBody()) + section('How to work with me', rulesBody())).trim() + '\n';
 }
 
@@ -1322,17 +1353,17 @@ function pinSections(text) {
 function sanityHints() {
   const hints = [];
   const everything = [state.description, val('purpose'), val('coreFeatures')].join('\n');
-  const data = state.answers.data;
-  const dataText = answerText(data);
-  const saysNothing = hasContent(data) && data.source !== 'delegate'
-    && /\b(nothing (?:needs|has) to be saved|nothing (?:is )?saved|no(?:,| need for| need to)? (?:saving|storage|data|persistence)|current session|stateless|don'?t need to (?:save|store))\b/i.test(dataText)
-    && !/\b(but|except|keep|remember|history|sync)\b/i.test(dataText); // "No accounts, but keep history" is not "nothing"
-  if (saysNothing && /\b(catalog(ue)?|log|track|record|history|inventory|library|list|manage|save|notes?|journal|database|collection)\b/i.test(everything)) {
+  if (dataMode(state.answers.data) === 'none' && /\b(catalog(ue)?|log|track|record|history|inventory|library|list|manage|save|notes?|journal|database|collection)\b/i.test(everything)) {
     hints.push({ dim: 'data', text: 'You said nothing needs to be saved, but this sounds like it keeps records (catalog, log, track…). If the data must survive closing the app, change the Data & accounts answer.' });
   }
   const feats = toList(val('coreFeatures'));
   if (feats.length === 1 && /\b(view|see|show|display|browse|look at|read|list)\b/i.test(feats[0]) && !/\b(add|create|enter|import|upload|edit|log|record|sync|fetch|pull|scan|type)\b/i.test(feats[0])) {
     hints.push({ dim: 'coreFeatures', text: "Only one must-have feature, and it's about viewing. Where does the data come from — typed in, imported, or fetched from somewhere? Add that as a feature, or the AI will guess." });
+  }
+  // Frameworks and infrastructure, not languages: our own chip says "JavaScript / TypeScript" and must not trip this.
+  const heavy = /\b(react(?: native)?|angular|vue|svelte|next\.?js|nuxt|django|rails|spring|kubernetes|docker|graphql|redux|webpack|flutter)\b/i.exec(val('techStack'));
+  if (heavy && isBeginner()) {
+    hints.push({ dim: 'techStack', text: `You're new to coding and named ${heavy[0]} — a steep first project. If you're not attached to it, let the AI pick the simplest tool that does the job.` });
   }
   return hints;
 }
@@ -1380,7 +1411,7 @@ Rules:
 - Write in the first person, as the person speaking to the AI that will build the project.
 - Keep every fact, preference and constraint they gave. Do not invent features, integrations or requirements they did not ask for. Where they said "not sure" or "let the AI decide", explicitly hand that decision to the AI and ask it to state its choice.
 - Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
-- Use this structure, skipping a section only when there is truly nothing for it: title; overview (what, why, who); type and platform; must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; starting point; what to deliver; success criteria; open questions.
+- Use this structure, and never add sub-headings such as "Overview" inside a section: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
 - Do not write a "How to work with me" section or a "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Both sections are appended afterwards exactly as the person wrote them.
 - Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
 - Output only the prompt, in Markdown.`;
@@ -1739,6 +1770,10 @@ function onNext() {
   if (!answer.choices.length && !answer.text) { toast(q.type === 'text' ? 'Type an answer, or use Skip / Let the AI decide' : 'Pick an option, type something, or skip'); return; }
   commitAnswer(state.current, answer);
   invalidatePolish();
+  // Raise a doubt while the answer is still fresh, not only on the result screen.
+  const dimId = q.kind === 'dim' ? q.id : q.covers;
+  const hint = dimId ? sanityHints().find((h) => h.dim === dimId) : null;
+  if (hint) toast(hint.text, 'bad', 7000);
   advance();
 }
 function onSkip() { commitAnswer(state.current, { choices: [], text: '', source: 'skipped' }); invalidatePolish(); advance(); }

@@ -17,7 +17,9 @@ let mockCalls = [];
 const hanging = new Set(); // responses deliberately never answered (timeout test); closed at exit
 // The mock "polish" misbehaves the way a small model does: it invents a decision under "Things I didn't
 // specify" and pads the rules. The app must strip both and pin its own versions.
-const POLISHED = '# Polished prompt\n\nThis is the AI-polished version.\n\n## Must-have features\n1. Log flights\n\n## Things I didn\'t specify\n- Invented decision: dark mode\n\n## How to work with me\n- Padded rule. I appreciate your guidance.\n';
+// It also sprinkles "### Overview" under headings, repeats a section under a near-identical heading, and
+// leaves a dangling rule line — all seen from a 7B model, all to be tidied away.
+const POLISHED = '# Polished prompt\n\n### Overview\nThis is the AI-polished version.\n\n## Must-have features\n### Overview\n1. Log flights\n\n## Look & feel\nClean.\n\n## Look and feel\nDuplicate section.\n\n## Things I didn\'t specify\n- Invented decision: dark mode\n\n## How to work with me\n- Padded rule. I appreciate your guidance.\n\n---\n';
 const QUESTIONS_ROUND_1 = { questions: [
   { id: 'battery_tracking', label: 'Battery tracking', question: 'How should battery cycles be tracked — per battery with a label, or just a total count?', why: 'It changes the data model.', options: ['Per battery with a label', 'Just a total', 'Not sure — you decide'], allowMultiple: false, covers: 'other' },
   { id: 'who', question: 'Roughly how many club members will use it?', options: ['Under 10', '10–50', 'More than 50'], covers: 'users' },
@@ -26,7 +28,7 @@ const QUESTIONS_ROUND_1 = { questions: [
 const QUESTIONS_CANON = { questions: [
   { id: 'kind', question: 'Is this a website, an app, or something else?', options: ['web app', 'mobile app'], covers: 'projectType' },
   { id: 'skill', question: 'How comfortable are you with programming?', options: ['Not very comfortable (need more guidance)', 'Fairly comfortable'], covers: 'skillLevel' },
-  { id: 'remember', question: 'Does it need to remember anything between uses?', options: ['No, just for the current session', 'Yes'], covers: 'data' },
+  { id: 'remember', question: 'Does it need to remember anything between uses?', options: ["No, it's okay if data is lost between uses", 'Yes'], covers: 'data' },
   { id: 'stack', question: 'Any technology preference?', options: ['Not sure — you decide', 'Python'], covers: 'techStack' },
 ] };
 /** What the "model" says for a given system prompt + user message, and how it stopped. */
@@ -146,6 +148,9 @@ async function answerLoop(page, maxSteps = 20) {
 function checkPinned(page, text, label) {
   check(text.startsWith('# Polished prompt'), label + ': polished text does not start with the model output');
   check(!/Invented decision|Padded rule/.test(text), label + ": model's own pinned sections were not stripped");
+  check(!/^#+\s*Overview/m.test(text) && text.includes('This is the AI-polished version.') && text.includes('1. Log flights'), label + ': "### Overview" filler headings not removed (or their content lost)');
+  check(!/Duplicate section/.test(text) && text.includes('## Look & feel\nClean.'), label + ': repeated section not dropped');
+  check(!/^\s*---\s*$/m.test(text), label + ': dangling rule line kept');
   check(/## Things I didn't specify\nI haven't decided on:/.test(text), label + ': canonical "Things I didn\'t specify" missing');
   check(/## How to work with me\n(- .*\n)*- Before you write any code/.test(text) && text.trim().endsWith('doing something different.'), label + ': canonical rules missing or not last');
 }
@@ -505,14 +510,21 @@ await test('Test 14: sanity hints', async () => {
   await page.waitForSelector('#screen-refine:not(.hidden)');
   check(await skipUntil(page, /must the first version/i), 'features question not reached');
   await page.fill('#q-free', 'View series info'); await page.click('#q-next');
+  check(/Only one must-have feature/.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when the single view-only feature was entered');
   check(await skipUntil(page, /remember anything between uses/i), 'data question not reached');
   await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next'); // "Nothing needs to be saved"
+  check(/nothing needs to be saved/i.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when "nothing saved" was chosen for a catalog');
+  check(await skipUntil(page, /language or tools/i), 'technology question not reached');
+  await page.click('#q-chips .chip >> nth=2'); await page.fill('#q-free', 'React'); await page.click('#q-next'); // JavaScript / TypeScript + React
+  check(await skipUntil(page, /comfortable are you with code/i), 'experience question not reached');
+  await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next'); // Beginner
   await skipUntil(page, /never matches/);
   await page.waitForSelector('#screen-result:not(.hidden)');
   const hints = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
   log('  hints: ' + hints.replace(/\s+/g, ' ').trim());
   check(/nothing needs to be saved/i.test(hints), 'no hint about a catalog that saves nothing');
   check(/Where does the data come from/.test(hints), 'no hint about a single view-only feature');
+  check(/named React — a steep first project/.test(hints), 'no hint about a beginner choosing React');
   // "change answer" on a hint reopens that question; a real answer clears the hint.
   await page.click('#sanity [data-ask="data"]');
   await page.waitForSelector('#screen-refine:not(.hidden)');
@@ -545,9 +557,11 @@ await test('Test 15: canonicalised AI answers', async () => {
   check(/- \*\*Type:\*\* Web app \(runs in the browser\)\n/.test(prompt), 'type not canonicalised: ' + (/\*\*Type:\*\*[^\n]*/.exec(prompt) || [])[0]);
   check(/- \*\*Platform:\*\* Desktop browsers\n/.test(prompt), 'platform answer missing');
   check(/## How to work with me\n- I'm new to programming/.test(prompt), '"not very comfortable" not mapped onto the beginner wording');
-  check(/## Data and accounts\nNo, just for the current session \(my answer to: "Does it need to remember anything between uses\?"\)\n/.test(prompt), 'AI data answer not shown with its question');
+  check(/## Data and accounts\nNothing needs to persist between sessions — keep it stateless and simple\. \(I answered: "No, it's okay if data is lost between uses"\.\)\n/.test(prompt), 'AI data answer not classified as "none" and quoted: ' + (/## Data and accounts\n[^\n]*/.exec(prompt) || [])[0]);
   check(/## Technology\nNo strong preference\./.test(prompt), '"Not sure — you decide" not treated as a delegation');
-  check(/nothing needs to be saved/i.test(await page.$eval('#sanity', (el) => el.textContent)), 'catalog + "current session only" did not raise the sanity hint');
+  check(/## What I want from you\nI'm new to this, so give me the simplest thing that runs/.test(prompt), 'beginner default for the deliverable missing');
+  check(!/I haven't decided on:[^\n]*what you want back/.test(prompt), 'deliverable still listed as unspecified despite the beginner default');
+  check(/nothing needs to be saved/i.test(await page.$eval('#sanity', (el) => el.textContent)), 'catalog + "data is lost between uses" did not raise the sanity hint');
   await page.context().close();
 });
 
