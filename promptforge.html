@@ -1544,10 +1544,16 @@ const API = {
     try {
       return await this.chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal });
     } catch (e) {
+      const msg = String(e && e.message);
       // A local / OpenAI-compatible server may not know response_format. Ask once more without it —
       // the tolerant JSON parser downstream still copes with a plain-text reply.
-      if (schema && settings.provider === 'custom' && /^(400|422)\b/.test(String(e && e.message))) {
+      if (schema && settings.provider === 'custom' && /^(400|422)\b/.test(msg)) {
         try { return await this.chatOnce({ system, user, maxTokens, effort, onDelta, signal }); } catch (e2) { throw networkError(e2); }
+      }
+      // Free tiers rate-limit in bursts; a short pause and one more try clears most of them.
+      if (/^429\b/.test(msg) && !(signal && signal.aborted)) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try { return await this.chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal }); } catch (e2) { throw networkError(e2); }
       }
       throw networkError(e);
     }
@@ -1581,6 +1587,12 @@ const API = {
     const body = { model: currentModel(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
     if (schema) body.response_format = { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema } };
     if (stream) body.stream = true;
+    // OpenRouter moves on to the next listed model when one is rate-limited or down (its "models" routing
+    // parameter). Free models are shared and busy in bursts, so the other free ones from Fetch list stand in.
+    if (settings.provider === 'custom' && settings.preset === 'openrouter' && Array.isArray(settings.freeModels)) {
+      const chain = [body.model, ...settings.freeModels.filter((m) => m !== body.model)].slice(0, 5);
+      if (chain.length > 1) body.models = chain;
+    }
     const { r, touch, done } = await fetchWithTimeout(this.openaiBase() + '/chat/completions', { method: 'POST', headers: this.openaiHeaders(), body: JSON.stringify(body) }, 0, signal);
     try {
       if (!stream) {
@@ -2183,6 +2195,7 @@ function init() {
     const preset = PRESET_BY_ID[draft.preset] || PRESET_BY_ID.other;
     if (preset.baseUrl) draft.baseUrl = preset.baseUrl;
     draft.model = '';
+    draft.freeModels = [];
     $('#model-list').innerHTML = '';
     $('#s-test-result').textContent = '';
     renderSettings();
@@ -2193,9 +2206,11 @@ function init() {
     try {
       const ids = sortModels(await withTempSettings(() => API.models()), draft.provider === 'custom' ? draft.preset : '');
       $('#model-list').innerHTML = ids.map((m) => `<option value="${esc(m)}">`).join('');
-      const free = ids.filter((m) => /:free$/i.test(m)).length;
+      const freeIds = ids.filter((m) => /:free$/i.test(m));
+      // Remembered so a busy free model can be swapped for another one at call time.
+      if (draft.provider === 'custom' && (PRESET_BY_ID[draft.preset] || {}).freeFirst) draft.freeModels = freeIds.slice(0, 8);
       // Some services publish their model list without a key, so a successful fetch must not read as "connected".
-      $('#s-test-result').textContent = `${ids.length} models loaded${free ? `, ${free} free (ending in ":free")` : ''} — start typing in the model box to pick one.`
+      $('#s-test-result').textContent = `${ids.length} models loaded${freeIds.length ? `, ${freeIds.length} free (ending in ":free")` : ''} — start typing in the model box to pick one.`
         + (keyNeeded() && !draft.apiKey ? ' Now paste your key above, then Test connection.' : '');
       if (!$('#s-model').value && ids.length) $('#s-model').value = ids[0];
     } catch (e) { $('#s-test-result').textContent = 'Could not fetch models: ' + e.message + failureHint(e); }
@@ -2210,7 +2225,11 @@ function init() {
       // Room for thinking tokens, which count against the cap; at 20 the reply itself could be empty.
       const { text: reply } = await withTempSettings(() => API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 200, effort: 'low' }));
       out.textContent = 'Connected ✓ (model replied: ' + reply.trim().slice(0, 40) + ')';
-    } catch (e) { out.textContent = 'Failed: ' + e.message + failureHint(e); }
+    } catch (e) {
+      const busy = /^429\b/.test(String(e.message)) && draft.preset === 'openrouter'
+        ? ' Free models are shared and get busy; during a brief the app moves on to the other free models by itself, or Fetch list and pick a different ":free" one now.' : '';
+      out.textContent = 'Failed: ' + e.message + failureHint(e) + busy;
+    }
   });
   $('#settings-save').addEventListener('click', () => {
     readSettingsForm();

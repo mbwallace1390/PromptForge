@@ -25,7 +25,7 @@ Open **Settings** and pick a provider:
 - **Claude (Anthropic)** — calls the Messages API directly from the browser using the `anthropic-dangerous-direct-browser-access` header. Default model `claude-sonnet-5`; "Fetch list" pulls current models from the account.
 - **OpenAI** — calls `chat/completions` directly. Default model `gpt-5.6-terra`.
 - **Free & local** — pick a service from the list and the address is filled in:
-  - **OpenRouter** — sign up, create a key (no card), Fetch list, choose a model ending in `:free`. Rate-limited, free.
+  - **OpenRouter** — sign up, create a key (no card), Fetch list, choose a model ending in `:free`. Free models are shared and get busy in bursts (a "429"); the app waits a moment and retries, and during a brief it sends the other free models from your list as fallbacks so a busy one is skipped automatically.
   - **Groq** and **Google AI Studio** — free tiers with daily limits; same flow, key from their console.
   - **Ollama** or **LM Studio** — a model running on your own computer, free and offline; needs a reasonably capable machine. See "Running it" for the one setting Ollama needs.
   - **Other** — any server that speaks the OpenAI chat format.

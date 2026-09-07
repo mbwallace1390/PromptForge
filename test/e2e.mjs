@@ -68,6 +68,11 @@ const server = http.createServer((req, res) => {
     const sys = anthropic ? String(j.system || '') : (j.messages?.[0]?.content || '');
     const user = anthropic ? (j.messages?.[0]?.content || '') : (j.messages?.[1]?.content || '');
     mockCalls.push({ url: req.url, sys: sys.slice(0, 40), user, body: j });
+    // A busy free model: 429 on the first call, fine on the next — the app must pause and retry once.
+    if (!anthropic && j.model === 'mock-429' && !mockCalls.slice(0, -1).some((c) => c.body.model === 'mock-429')) {
+      res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'Provider returned error' } }));
+    }
     // A wrong or missing key: the service's own wording is unhelpful, the app must say what to do.
     if (!anthropic && j.model === 'mock-401') {
       res.writeHead(401, { ...cors, 'Content-Type': 'application/json' });
@@ -603,6 +608,38 @@ await test('Test 16: presets', async () => {
   const rejected = await page.$eval('#s-test-result', (el) => el.textContent);
   log('  401 reads as: ' + rejected);
   check(/Failed: 401 the service rejected the key/.test(rejected) && !/PromptForge\.cmd/.test(rejected), 'a 401 should be explained in plain words, without the unreachable-server hint');
+  // A 429 is retried once after a pause; the second attempt succeeds.
+  mockCalls = [];
+  await page.fill('#s-model', 'mock-429');
+  await page.click('#s-test');
+  await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 8000 });
+  const after429 = await page.$eval('#s-test-result', (el) => el.textContent);
+  log(`  429 then retry: ${after429}; chat calls: ${mockCalls.filter((c) => /connectivity/.test(c.sys)).length}`);
+  check(/Connected ✓/.test(after429) && mockCalls.filter((c) => /connectivity/.test(c.sys)).length === 2, 'a 429 should be retried once and then succeed');
+  await page.click('#settings-cancel');
+  await page.context().close();
+});
+
+// ---------- Test 18: OpenRouter free-model fallbacks travel with the request ----------
+await test('Test 18: OpenRouter fallback chain', async () => {
+  mockCalls = [];
+  const page = await newPage({ provider: 'custom', preset: 'openrouter', baseUrl: 'http://localhost:8787/v1', apiKey: 'k', model: 'a:free', freeModels: ['a:free', 'b:free', 'c:free', 'd:free', 'e:free', 'f:free'], autoPolish: false, depth: 'quick' });
+  await page.click('#settings-btn');
+  await page.click('#s-test');
+  await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 8000 });
+  const call = mockCalls.find((c) => /connectivity/.test(c.sys));
+  log('  models sent: ' + JSON.stringify(call && call.body.models));
+  check(call && call.body.model === 'a:free' && JSON.stringify(call.body.models) === JSON.stringify(['a:free', 'b:free', 'c:free', 'd:free', 'e:free']), 'OpenRouter request should carry the chosen model plus up to four free fallbacks');
+  // Fetch list refreshes the remembered free models (mock returns none), and a non-OpenRouter preset sends no chain.
+  await page.click('#s-fetch-models');
+  await page.waitForFunction(() => /models loaded|Could not/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 5000 });
+  await page.selectOption('#s-preset', 'other');
+  await page.fill('#s-baseurl', 'http://localhost:8787/v1'); await page.fill('#s-model', 'mock');
+  mockCalls = [];
+  await page.click('#s-test');
+  await page.waitForFunction(() => /Connected|Failed/.test(document.querySelector('#s-test-result').textContent), null, { timeout: 8000 });
+  const plain = mockCalls.find((c) => /connectivity/.test(c.sys));
+  check(plain && !('models' in plain.body), 'a non-OpenRouter server must not receive the models chain');
   await page.click('#settings-cancel');
   const sorted = await page.evaluate(() => window.PromptForge.sortModels(['zeta', 'alpha:free', 'gpt-x', 'beta:free'], 'openrouter'));
   log('  sortModels: ' + sorted.join(', '));
