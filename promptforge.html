@@ -1412,7 +1412,8 @@ function sanityHints() {
   }
   const feats = toList(val('coreFeatures'));
   if (feats.length === 1 && /\b(view|see|show|display|browse|look at|read|list)\b/i.test(feats[0]) && !/\b(add|create|enter|import|upload|edit|log|record|sync|fetch|pull|scan|type)\b/i.test(feats[0])) {
-    hints.push({ dim: 'coreFeatures', text: "Only one must-have feature, and it's about viewing. Where does the data come from — typed in, imported, or fetched from somewhere? Add that as a feature, or the AI will guess." });
+    // Phrased as a question with one example: a list of options here got copied in as three features once.
+    hints.push({ dim: 'coreFeatures', text: "Only one must-have feature, and it's about viewing. Add one that says how the information gets into the app, in your own words (for example: \"staff type it in\"). Otherwise the AI will guess." });
   }
   // Frameworks and infrastructure, not languages: our own chip says "JavaScript / TypeScript" and must not trip this.
   const heavy = /\b(react(?: native)?|angular|vue|svelte|next\.?js|nuxt|django|rails|spring|kubernetes|docker|graphql|redux|webpack|flutter)\b/i.exec(val('techStack'));
@@ -1464,6 +1465,7 @@ const POLISH_SYSTEM = `You write outstanding prompts for AI coding assistants (C
 Rules:
 - Write in the first person, as the person speaking to the AI that will build the project.
 - Keep every fact, preference and constraint they gave. Do not invent features, integrations or requirements they did not ask for. Where they said "not sure" or "let the AI decide", explicitly hand that decision to the AI and ask it to state its choice.
+- If you add any detail the person did not give — a feature, a data source, a hosting choice, a style, a constraint — append " (suggested)" to it so they can delete it. Never present your own suggestion as their requirement.
 - Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
 - Use Markdown headings ("## Section") for sections, never bold lines, and never add sub-headings such as "Overview" inside a section. Structure: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
 - Do not write a "How to work with me" section or a "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Both sections are appended afterwards exactly as the person wrote them.
@@ -1930,6 +1932,7 @@ function renderResult() {
   const notice = $('#result-notice');
   if (!aiEnabled()) { notice.className = 'notice'; notice.innerHTML = 'Built-in mode. Add a free service (OpenRouter, Groq, Google AI Studio), a Claude or OpenAI key, or a model on this computer in <button class="btn sm ghost" type="button" data-open-settings style="display:inline-flex;padding:.1rem .5rem">Settings ⚙</button> for questions tailored to your project and an AI-polished final prompt.'; }
   else if (p.view === 'polished' && p.polished && p.truncated) { notice.className = 'notice warn'; notice.textContent = "The AI-polished prompt hit the model's output limit and may be cut off at the end. Check it, or polish again."; }
+  else if (p.view === 'polished' && p.polished) { notice.className = 'notice'; notice.textContent = "AI rewrite. Anything marked (suggested) is the AI's idea, not yours — delete what you don't want. The Structured tab holds only what you said."; }
   else notice.className = 'notice hidden';
 
   const hints = sanityHints();

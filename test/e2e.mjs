@@ -287,7 +287,8 @@ await test('Test 3: AI mode (mock server)', async () => {
   log(`  AI asked ${asked.length} questions; mock calls: ${mockCalls.map((c) => c.sys).join(' | ')}`);
   check(polished.includes('Polished prompt'), 'polished view not shown');
   checkPinned(page, polished, 'Test 3');
-  check(await page.$eval('#result-notice', (el) => el.classList.contains('hidden')), 'a complete polish must not show the cut-off warning');
+  const polishNotice = await page.$eval('#result-notice', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
+  check(/\(suggested\)/.test(polishNotice) && !/cut off/.test(polishNotice), 'a complete polish should carry the "(suggested)" note, not the cut-off warning');
   await page.click('#tab-structured');
   const structured = await promptText(page);
   check(structured.includes('Additional details') && structured.includes('battery cycles be tracked'), 'AI "other" answer missing from structured prompt');
@@ -550,7 +551,7 @@ await test('Test 14: sanity hints', async () => {
   const hints = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
   log('  hints: ' + hints.replace(/\s+/g, ' ').trim());
   check(/nothing needs to be saved/i.test(hints), 'no hint about a catalog that saves nothing');
-  check(/Where does the data come from/.test(hints), 'no hint about a single view-only feature');
+  check(/how the information gets into the app/.test(hints), 'no hint about a single view-only feature');
   check(/named React — a steep first project/.test(hints), 'no hint about a beginner choosing React');
   // "change answer" on a hint reopens that question; a real answer clears the hint.
   await page.click('#sanity [data-ask="data"]');
@@ -559,7 +560,7 @@ await test('Test 14: sanity hints', async () => {
   await page.click('#q-chips .chip >> nth=1'); await page.click('#q-next'); // "Save on the device only"
   await page.waitForSelector('#screen-result:not(.hidden)');
   const after = await page.$eval('#sanity', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
-  check(!/nothing needs to be saved/i.test(after) && /Where does the data come from/.test(after), 'hints did not update after changing the data answer');
+  check(!/nothing needs to be saved/i.test(after) && /how the information gets into the app/.test(after), 'hints did not update after changing the data answer');
   await page.context().close();
 });
 
