@@ -549,7 +549,14 @@ function toList(text) {
   if (lines.length === 1) {
     const one = lines[0];
     if (one.includes(';')) lines = one.split(';').map((s) => s.trim()).filter(Boolean);
-    else if ((one.match(/,/g) || []).length >= 2) lines = one.split(/,\s*(?:and\s+)?/).map((s) => s.trim()).filter(Boolean);
+    else if ((one.match(/,/g) || []).length >= 2) {
+      const parts = one.split(/,\s*(?:and\s+)?/).map((s) => s.trim()).filter(Boolean);
+      const sizes = parts.map(wordCount);
+      // "log flights, track batteries, see who's flying" is three items; so is "CSV export, charts, dark mode".
+      // "Log a flight with date, model, and duration" is one item with a list inside it: a long head
+      // followed by one-word tails. Only split when the pieces are all phrases or all short labels.
+      if (sizes.every((n) => n >= 2) || sizes.every((n) => n <= 2)) lines = parts;
+    }
   }
   return lines;
 }
@@ -561,7 +568,7 @@ const DEFAULT_MODELS = {
   custom: ['llama3.1', 'qwen2.5-coder', 'mistral'],
 };
 const settings = Object.assign(
-  { provider: 'none', apiKey: '', model: '', baseUrl: 'http://localhost:11434/v1', autoPolish: true, depth: 'quick' },
+  { provider: 'none', apiKey: '', model: '', baseUrl: 'http://localhost:11434/v1', autoPolish: true, depth: 'quick', apiTimeoutMs: 45000 },
   store.get('pf_settings', {})
 );
 function saveSettings() { store.set('pf_settings', settings); refreshAiBadge(); }
@@ -596,7 +603,7 @@ const TYPE_PATTERNS = [
   ['Website', /\b(web ?site|landing page|home ?page|blog|portfolio site|static site|wordpress|squarespace|wix)\b/i],
   ['Web app (runs in the browser)', /\b(web ?app|webapp|web-based|browser[- ]based|in (the|a) browser|saas|online tool|web dashboard|single[- ]page app|next\.?js|nuxt|svelte|angular)\b|\bReact\b|\bVue\b/i],
   ['Desktop program', /\b(desktop|windows (app|program|application|tool|software)|mac ?os|linux (app|program)|\.exe\b|electron|tauri|pc (app|program|tool|application|software)|wpf|winforms|tkinter|pyqt|qt app)\b/i],
-  ['Command-line tool or script', /\b(script|cli\b|command[- ]line|terminal|bash|powershell|shell|cron job|batch file|automate|automation)\b/i],
+  ['Command-line tool or script', /\b(script|cli\b|command[- ]line|terminal|bash|powershell|shell|cron job|batch file)\b/i],
   ['Bot (Discord, Telegram, Slack…)', /\b(bot\b|discord|telegram|slack bot|twitch|chatbot|whatsapp)\b/i],
   ['Browser extension', /\b(browser extension|chrome extension|firefox (add-?on|extension)|extension for (chrome|firefox|edge)|userscript|tampermonkey|greasemonkey)\b/i],
   ['Game', /\b(game\b|unity|godot|unreal|pygame|platformer|roguelike|rpg\b|puzzle game)\b/i],
@@ -605,6 +612,10 @@ const TYPE_PATTERNS = [
   ['Spreadsheet or office automation', /\b(excel|spreadsheet|google sheets|vba|macro\b|office add-?in)\b/i],
 ];
 const NOT_SURE_TYPE = 'Not sure — recommend one';
+const API_TYPE = 'API or backend service';
+// "posts the weather from an API" is consuming an API, not building one. Only let the API type win a
+// tie with another type when the description says it wants to build one.
+const BUILDS_API_RE = /\b(build|make|create|write|need|want|design)\s+(an?\s+|the\s+|my\s+|a new\s+)?(rest(ful)?\s+|graphql\s+|simple\s+|small\s+)?(api|backend|back-?end|web ?service|microservice)\b/i;
 
 const PLATFORM_OPTIONS = {
   'Mobile app': ['Android', 'iPhone / iOS', 'Both Android and iOS'],
@@ -632,9 +643,11 @@ const STACK_PATTERNS = [
   ['Firebase', /\bfirebase\b/i], ['Supabase', /\bsupabase\b/i], ['Tailwind', /\btailwind\b/i], ['Arduino', /\barduino\b/i], ['WebView', /\bwebview\b/i],
 ];
 
-const INTEGRATION_RE = /\b(apis?\b|google (maps|calendar|drive|sheets|photos)|calendar|spotify|youtube|twitter|instagram|facebook|discord|telegram|slack|stripe|paypal|payments?|email|sms|twilio|push notifications?|notifications?|weather|gps|location|camera|bluetooth|ble\b|usb|serial port|nfc|qr codes?|barcodes?|openai|chatgpt|claude|llm|webhooks?|zapier|ifttt|home assistant|mqtt|smart home|printer|scanner|github|strava|fitbit|garmin)\b/gi;
+const INTEGRATION_RE = /\b(google (maps|calendar|drive|sheets|photos)|calendar|spotify|youtube|twitter|instagram|facebook|discord|telegram|slack|stripe|paypal|payments?|email|sms|twilio|push notifications?|notifications?|weather|gps|location|camera|bluetooth|ble\b|usb|serial port|nfc|qr codes?|barcodes?|openai|chatgpt|claude|llm|webhooks?|zapier|ifttt|home assistant|mqtt|smart home|printer|scanner|github|strava|fitbit|garmin)\b/gi;
 const DESIGN_RE = /\b(dark mode|dark theme|light theme|minimal(ist)?|clean (look|design|ui|interface)|modern (look|design|ui|interface)|material design|colou?rful|playful|professional (look|design)|look and feel|looks? like|similar to|brand colou?rs?|retro|neon|glassmorphism|cartoon(y)?|pixel art)\b/gi;
-const CONSTRAINT_RE = /\b(offline|no internet|without internet|free (to run|tier|hosting)|no paid|zero cost|low budget|cheap(ly)?|deadline|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|end of \w+)|privacy|private|gdpr|hipaa|accessib\w*|screen reader|lightweight|low[- ]power|battery(-| )friendly|must not|can'?t use|cannot use|no (ads|tracking|accounts?|login)|open[- ]source|self[- ]hosted|no cloud)\b/gi;
+// Matches are shown to the user and can end up in the prompt, so each alternative has to read as a
+// requirement on its own ("private Discord bot" is not a privacy constraint; "keep data private" is).
+const CONSTRAINT_RE = /\b(offline|no internet|without internet|free (to run|tier|hosting)|no paid services?|zero cost|low budget|cheap(ly)? to run|deadline|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|end of \w+)|privacy[- ](first|focused|friendly)|keep (it|things|data|everything) private|private data|data (stays|must stay|should stay) (private|local)|gdpr|hipaa|accessib\w*|screen reader|lightweight|low[- ]power|battery(-| )friendly|no (ads|tracking|accounts?|login)|open[- ]source|self[- ]hosted|no cloud)\b/gi;
 const NICE_RE = /\b(nice to have|would be (nice|cool|great|awesome)|eventually|later on|in the future|down the (road|line)|bonus|optionally|if possible|stretch goal|phase 2|v2\b|version 2)\b/i;
 const PURPOSE_RE = /\b(so (that )?(i|we|users|they|people|members|customers)|because|to help|helps?\b|problem|instead of|frustrat\w*|tired of|easier|faster|save (me |us )?time|keep track|track|manage|organi[sz]e|goal|purpose|the idea is|the point is)\b/i;
 
@@ -648,6 +661,14 @@ function typeOf(answers) {
   const a = answers.projectType;
   return a && a.choices && a.choices[0] ? a.choices[0] : null;
 }
+/** "a, b and c" for prose. */
+function listJoin(items) {
+  const a = items.map(String);
+  return a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+}
+const capFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+/** Detector result for phrases found in the description: shown in the brief, pre-filled into the question, never quoted raw in the prompt. */
+const hitsResult = (hits) => (hits.length ? { hits, note: 'from your description' } : null);
 
 const DIMS = [
   {
@@ -656,7 +677,9 @@ const DIMS = [
     why: 'This decides the tools, the platform, and half of the other questions.',
     options: [...Object.keys(PLATFORM_OPTIONS), NOT_SURE_TYPE],
     detect(text) {
-      const hits = TYPE_PATTERNS.filter(([, re]) => re.test(text)).map(([label]) => label);
+      let hits = TYPE_PATTERNS.filter(([, re]) => re.test(text)).map(([label]) => label);
+      // Demote "API" when it is something the project talks to rather than the thing being built.
+      if (hits.length > 1 && hits.includes(API_TYPE) && !BUILDS_API_RE.test(text)) hits = hits.filter((h) => h !== API_TYPE);
       if (hits.length === 1) return { choices: [hits[0]], note: 'from your description' };
       if (hits.length > 1) return { hint: 'Your description could be: ' + hits.join(' · ') + '. Pick the main one.' };
       return null;
@@ -760,11 +783,8 @@ const DIMS = [
     why: "If you don't care, say so — the AI will pick something mainstream and well documented.",
     options: ['No preference — pick the best fit', 'Python', 'JavaScript / TypeScript', 'Kotlin / Android', 'Swift / iOS', 'C# / .NET', 'Java', 'Rust', 'C / C++', 'Lua', 'Other (say which)'],
     placeholder: 'e.g. It has to match my existing Kotlin app, or: I want to learn Python so use that.',
-    detect(text) {
-      const hits = STACK_PATTERNS.filter(([, re]) => re.test(text)).map(([l]) => l);
-      if (hits.length) return { choices: [], text: 'Mentioned: ' + hits.join(', '), note: 'from your description' };
-      return null;
-    },
+    detect(text) { return hitsResult(STACK_PATTERNS.filter(([, re]) => re.test(text)).map(([l]) => l)); },
+    prefill: (hits) => ({ choices: [], text: `Use ${hits.join(', ')}.` }),
     delegate: 'No strong preference. Choose the most appropriate mainstream, well-documented stack for this kind of project and explain your choice in a short paragraph.',
   },
   {
@@ -812,11 +832,8 @@ const DIMS = [
     why: 'Things like "must work offline" or "no paid services" are cheap to say now and expensive to discover later.',
     options: ['Must work offline', 'Must be free to run (no paid services)', 'Keep data private / local', 'Fast and lightweight', 'Accessibility matters', 'Has a deadline (say when)', 'None I can think of'],
     placeholder: 'e.g. Has to run on an old laptop; needs to be done before the club meet on the 20th.',
-    detect(text) {
-      const hits = uniqMatches(text, CONSTRAINT_RE);
-      if (hits.length) return { choices: [], text: 'From the description: ' + hits.join(', '), note: 'from your description' };
-      return null;
-    },
+    detect(text) { return hitsResult(uniqMatches(text, CONSTRAINT_RE)); },
+    prefill: (hits) => ({ choices: [], text: hits.join('\n') }),
     delegate: 'No special constraints; use sensible defaults and keep it simple to run.',
   },
   {
@@ -825,11 +842,8 @@ const DIMS = [
     why: 'Even a rough steer ("clean, dark, big buttons") saves a lot of back-and-forth.',
     options: ['Clean and minimal', 'Modern and polished', 'Fun and colorful', 'Dark mode', 'Big, simple controls', 'Match an existing app or brand (describe)', "Function over form — don't care much"],
     placeholder: 'e.g. Like the Google Fit app: card-based, lots of white space, one accent color.',
-    detect(text) {
-      const hits = uniqMatches(text, DESIGN_RE);
-      if (hits.length) return { choices: [], text: 'From the description: ' + hits.join(', '), note: 'from your description' };
-      return null;
-    },
+    detect(text) { return hitsResult(uniqMatches(text, DESIGN_RE)); },
+    prefill: (hits) => ({ choices: [], text: capFirst(hits.join(', ')) + '.' }),
     delegate: 'Use a clean, modern, uncluttered look with sensible defaults; I care more about it working well than about looks.',
   },
   {
@@ -842,9 +856,9 @@ const DIMS = [
       let hits = uniqMatches(text, INTEGRATION_RE);
       const t = typeOf(answers);
       if (t && /bot/i.test(t)) hits = hits.filter((h) => !['discord', 'telegram', 'slack', 'whatsapp', 'twitch'].includes(h.toLowerCase())); // the chat platform itself isn't an integration
-      if (hits.length) return { choices: [], text: 'From the description: ' + hits.join(', '), note: 'from your description' };
-      return null;
+      return hitsResult(hits);
     },
+    prefill: (hits) => ({ choices: ['Yes (describe below)'], text: hits.join(', ') }),
     delegate: 'Keep external dependencies to a minimum; if something is clearly needed, choose a free, well-known option and tell me.',
   },
   {
@@ -852,7 +866,8 @@ const DIMS = [
     question: "Anything that would be nice, but isn't essential for the first version?",
     why: 'Separating these keeps the first version small and finishable.',
     placeholder: 'e.g. Charts of battery health over time; dark mode; share a flight log as an image.',
-    detect(text) { return NICE_RE.test(text) ? { choices: [], text: 'Mentioned in the description.', note: 'from your description' } : null; },
+    // Only a hint: "would be nice" tells us the question is worth asking, not what the answer is.
+    detect(text) { return NICE_RE.test(text) ? { hint: 'Your description mentions something optional — list those here so they stay out of version 1.' } : null; },
   },
   {
     id: 'successCriteria', label: 'Definition of done', priority: 'optional', type: 'text',
@@ -895,6 +910,7 @@ const state = {
   aiQuestions: [],    // { id, question, why, options, allowMultiple, covers, answer? }
   aiRound: 0,
   aiMode: false,
+  aiDone: false,      // the AI has no more questions (empty round or round limit) — built-in essentials still get asked
   single: false,      // answering one specific question from the result screen
   prompt: { structured: '', polished: '', view: 'structured', edited: false },
 };
@@ -902,7 +918,7 @@ const state = {
 function resetState() {
   Object.assign(state, {
     id: uid(), screen: 'describe', description: '', answers: {}, extraQA: [], asked: [], current: null,
-    aiQuestions: [], aiRound: 0, aiMode: false, single: false,
+    aiQuestions: [], aiRound: 0, aiMode: false, aiDone: false, single: false,
     prompt: { structured: '', polished: '', view: 'structured', edited: false },
   });
 }
@@ -914,9 +930,12 @@ function answerText(a) {
   const parts = [];
   if (a.choices && a.choices.length) parts.push(a.choices.map(cleanChoice).join(', '));
   if (a.text && a.text.trim()) parts.push(a.text.trim());
+  if (!parts.length && a.hits && a.hits.length) parts.push(a.hits.join(', '));
   return parts.join(' — ');
 }
-function hasContent(a) { return !!(a && (a.source === 'delegate' || (a.choices && a.choices.length) || (a.text && a.text.trim()))); }
+function hasContent(a) { return !!(a && (a.source === 'delegate' || (a.choices && a.choices.length) || (a.text && a.text.trim()) || (a.hits && a.hits.length))); }
+/** Phrases spotted in the description that the user has not confirmed yet (the question is still asked, pre-filled). */
+const isUnconfirmed = (a) => !!(a && a.source === 'detected' && a.ask);
 function dimStatus(id) {
   const a = state.answers[id];
   if (!a) return 'missing';
@@ -935,6 +954,9 @@ function runDetection() {
     const r = d.detect(text, state.answers);
     if (r && (r.choices || r.text)) {
       state.answers[d.id] = { choices: r.choices || [], text: r.text || '', source: 'detected', note: r.note || '' };
+    } else if (r && r.hits) {
+      // Keyword hits are a good guess, not an answer: keep asking, with the box pre-filled.
+      state.answers[d.id] = { choices: [], text: '', hits: r.hits, source: 'detected', note: r.note || '', ask: true };
     } else if (state.answers[d.id] && state.answers[d.id].source === 'detected') {
       delete state.answers[d.id];
     }
@@ -951,7 +973,7 @@ function pendingDims() {
   const order = { essential: 0, important: 1, optional: 2 };
   let list = DIMS.filter((d) => {
     if (state.asked.includes(d.id)) return false;
-    if (state.answers[d.id] && state.answers[d.id].source !== 'skipped' && hasContent(state.answers[d.id])) return false;
+    if (state.answers[d.id] && state.answers[d.id].source !== 'skipped' && hasContent(state.answers[d.id]) && !isUnconfirmed(state.answers[d.id])) return false;
     if (state.answers[d.id] && state.answers[d.id].source === 'skipped') return false;
     if (d.when && !d.when(state)) return false;
     return true;
@@ -969,7 +991,10 @@ function nextQuestionId() {
   if (state.aiMode) {
     const ai = pendingAi();
     if (ai.length) return ai[0].id;
-    return null; // engine will decide whether to fetch another round
+    if (!state.aiDone) return null; // engine will decide whether to fetch another round
+    // The AI is finished; anything essential it never covered (type, features…) still gets asked.
+    const ess = pendingDims().filter((d) => d.priority === 'essential');
+    return ess.length ? ess[0].id : null;
   }
   const p = pendingDims();
   return p.length ? p[0].id : null;
@@ -1023,7 +1048,8 @@ function strength() {
     const w = PRIORITY_WEIGHT[d.priority];
     total += w;
     const s = dimStatus(d.id);
-    if (s === 'answered' || s === 'detected') got += w;
+    if (s === 'detected' && isUnconfirmed(state.answers[d.id])) got += w * 0.6; // a keyword guess is worth as much as "AI decides"
+    else if (s === 'answered' || s === 'detected') got += w;
     else if (s === 'delegate') got += w * 0.6;
   }
   let pct = total ? (got / total) * 100 : 0;
@@ -1039,12 +1065,16 @@ const delegateLine = (id) => DIM_BY_ID[id].delegate || 'Use your best judgment h
 const section = (title, body) => (body && String(body).trim() ? `## ${title}\n${String(body).trim()}\n\n` : '');
 const has = (s, re) => re.test(s || '');
 
-function deriveTitle() {
-  const n = val('name');
-  if (n) return n;
-  const first = state.description.trim().split(/(?<=[.!?])\s+/)[0] || 'My project';
+function deriveTitle(description = state.description, name = val('name')) {
+  if (name) return name;
+  const first = String(description).trim().split(/(?<=[.!?])\s+/)[0] || 'My project';
   let t = first.replace(/^(i want|i'd like|i would like|i need|please|help me|can you|could you)\s+(to\s+)?(build|make|create|have|write|develop)?\s*(me\s+)?(an?|the|my)?\s*/i, '').trim();
   t = t.replace(/^(build|make|create|write|develop)\s+(me\s+)?(an?|the|my)?\s*/i, '').replace(/^(an?|the)\s+/i, '').replace(/[.!?]+$/, '');
+  // "Discord bot for our RC club that posts the weather from an…" — cut at the clause instead of mid-phrase.
+  if (t.length > 40) {
+    const m = /^(.{12,}?\S)(?:,|\s+(?:that|which|where|who|so|because|to let|to help)\s)/i.exec(t);
+    if (m && wordCount(m[1]) >= 2) t = m[1];
+  }
   if (t.length > 70) t = t.slice(0, 67).replace(/\s+\S*$/, '') + '…';
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : 'My project';
 }
@@ -1060,9 +1090,14 @@ const AUDIENCE_NOTES = [
 ];
 function audienceNote(users) { const hit = AUDIENCE_NOTES.find(([re]) => re.test(users)); return hit ? ' ' + hit[1] : ''; }
 
+// Answers that came through an AI-written question use the AI's own option wording, so the canned
+// rewrites below (which key off our chip labels) would mangle them. Quote those verbatim.
+const viaAi = (a) => !!(a && a.via === 'ai');
+
 function dataBody() {
   if (delegated('data')) return delegateLine('data');
   const a = state.answers.data; if (!hasContent(a)) return '';
+  if (viaAi(a)) return answerText(a);
   const c = (a.choices || []).join(' ');
   let s = '';
   if (/nothing/i.test(c)) s = 'Nothing needs to persist between sessions — keep it stateless and simple.';
@@ -1076,6 +1111,7 @@ function dataBody() {
 function deliverableBody() {
   if (delegated('deliverable')) return delegateLine('deliverable');
   const t = val('deliverable'); if (!t) return '';
+  if (viaAi(state.answers.deliverable)) return t;
   if (has(t, /single file/i)) return 'A single self-contained file I can open or run immediately, with no build step if at all possible.';
   if (has(t, /plan first|then the code/i)) return 'First, a short build plan (architecture, files, order of work). Once I confirm it, the complete code.';
   if (has(t, /just the plan|architecture/i)) return 'A plan and architecture only — no code yet. Describe the components, the data model, the key decisions, and the order you would build things in.';
@@ -1087,6 +1123,7 @@ function skillBody() {
   const t = delegated('skillLevel') ? '' : val('skillLevel');
   if (delegated('skillLevel')) return delegateLine('skillLevel');
   if (!t) return '';
+  if (viaAi(state.answers.skillLevel)) return t;
   if (has(t, /beginner|new|novice|non-?technical|not a (programmer|developer)|no experience/i)) return "I'm new to programming. Explain what you're doing in plain language, define any jargon, and give exact step-by-step instructions for installing, running, and testing. Prefer simple, well-known tools over clever ones.";
   if (has(t, /experienced|expert|senior|professional|skip the basics|developer/i)) return "I'm an experienced developer. Skip the basics and focus on architecture decisions, trade-offs, and clean, idiomatic code.";
   return "I can read and modify code but I'm not an expert. Explain the key decisions briefly and point out anything I'll need to set up or configure myself." + (has(t, /some experience|follow along/i) ? '' : ` (${t})`);
@@ -1094,6 +1131,7 @@ function skillBody() {
 function startingBody() {
   if (delegated('startingPoint')) return delegateLine('startingPoint');
   const a = state.answers.startingPoint; if (!hasContent(a)) return '';
+  if (viaAi(a)) return answerText(a);
   const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
   if (/scratch/i.test(c)) return 'This is a brand-new project.' + (extra ? ' ' + extra : '');
   if (/existing/i.test(c)) return "I'm adding to an existing project: " + (extra || "I'll share the relevant code — ask me for whatever you need to see before changing anything.");
@@ -1103,6 +1141,8 @@ function startingBody() {
 function integrationsBody() {
   if (delegated('integrations')) return delegateLine('integrations');
   const a = state.answers.integrations; if (!hasContent(a)) return '';
+  if (viaAi(a)) return answerText(a);
+  if (isUnconfirmed(a)) return `My description mentions ${listJoin(a.hits)}. Treat each as something this needs to connect to, and ask me for any details or keys you need.`;
   const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
   if (/^no$/i.test(c.trim()) && !extra) return 'None — keep it self-contained.';
   if (/not sure/i.test(c)) return delegateLine('integrations') + (extra ? ' ' + extra : '');
@@ -1112,14 +1152,17 @@ function integrationsBody() {
 function constraintsBody() {
   if (delegated('constraints')) return delegateLine('constraints');
   const a = state.answers.constraints; if (!hasContent(a)) return '';
+  if (isUnconfirmed(a)) return 'These came up in my description; treat them as requirements:\n' + a.hits.map((h) => `- ${h}`).join('\n');
   const items = (a.choices || []).filter((c) => !/none i can think of/i.test(c));
-  if (a.text && a.text.trim()) items.push(a.text.trim());
+  items.push(...toList(a.text)); // one bullet per line the user typed (or per pre-filled hit)
   if (!items.length) return "No special constraints beyond what's above.";
   return items.map((i) => `- ${i}`).join('\n');
 }
 function designBody() {
   if (delegated('design')) return delegateLine('design');
   const a = state.answers.design; if (!hasContent(a)) return '';
+  if (viaAi(a)) return answerText(a);
+  if (isUnconfirmed(a)) return `Follow what I described: ${a.hits.join(', ')}.`;
   const c = (a.choices || []).filter((x) => !/function over form/i.test(x));
   const extra = (a.text || '').trim();
   if (!c.length && !extra) return "I care more about it working well than about looks. Keep it clean and uncluttered; don't spend effort on visual flourishes.";
@@ -1155,6 +1198,7 @@ function buildStructuredPrompt() {
   out += section('What I want to build', what);
 
   if (delegated('users')) out += section("Who it's for", delegateLine('users'));
+  else if (viaAi(state.answers.users)) out += section("Who it's for", val('users'));
   else if (val('users')) out += section("Who it's for", val('users') + '.' + audienceNote(val('users')));
 
   out += section('Type and platform', typeLines());
@@ -1174,12 +1218,16 @@ function buildStructuredPrompt() {
   if (delegated('techStack')) out += section('Technology', delegateLine('techStack'));
   else if (val('techStack')) {
     const a = state.answers.techStack;
-    const choices = (a.choices || []).filter((c) => !/no preference|other \(say which\)/i.test(c));
-    const extra = (a.text || '').trim();
     let s = '';
-    if ((a.choices || []).some((c) => /no preference/i.test(c)) && !choices.length) s = delegateLine('techStack');
-    else if (choices.length) s = `Please use: ${choices.join(', ')}.`;
-    if (extra) s += (s ? ' ' : '') + extra;
+    if (viaAi(a)) s = answerText(a);
+    else if (isUnconfirmed(a)) s = `I mentioned ${listJoin(a.hits)} in my description. Use those unless there's a strong reason not to, and tell me if so.`;
+    else {
+      const choices = (a.choices || []).filter((c) => !/no preference|other \(say which\)/i.test(c));
+      const extra = (a.text || '').trim();
+      if ((a.choices || []).some((c) => /no preference/i.test(c)) && !choices.length) s = delegateLine('techStack');
+      else if (choices.length) s = `Please use: ${choices.join(', ')}.`;
+      if (extra) s += (s ? ' ' : '') + extra;
+    }
     out += section('Technology', s);
   }
 
@@ -1247,8 +1295,15 @@ async function parseResponse(r) {
   return j;
 }
 function networkError(e) {
+  if (e && e.name === 'AbortError') return new Error('the API took too long to respond');
   if (e instanceof TypeError) return new Error("couldn't reach the API (network, CORS, or a wrong URL)");
   return e;
+}
+/** fetch with a deadline. A stalled request must never leave the interview stuck behind a spinner. */
+async function fetchWithTimeout(url, init, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms || settings.apiTimeoutMs || 45000);
+  try { return await fetch(url, { ...init, signal: ctl.signal }); } finally { clearTimeout(timer); }
 }
 const API = {
   anthropicHeaders() {
@@ -1256,34 +1311,40 @@ const API = {
   },
   openaiBase() { return settings.provider === 'openai' ? 'https://api.openai.com/v1' : String(settings.baseUrl || '').replace(/\/+$/, ''); },
   openaiHeaders() { const h = { 'Content-Type': 'application/json' }; if (settings.apiKey) h.Authorization = 'Bearer ' + settings.apiKey; return h; },
-  async chat({ system, user, maxTokens = 2500 }) {
-    let r;
+  /**
+   * One chat completion. Resolves to { text, truncated }: `truncated` means the model hit the output
+   * cap, so the caller decides whether a cut-off answer is still usable. `effort` (Claude only) trades
+   * thinking depth for speed — right for a short JSON list, wrong for the final prompt.
+   */
+  async chat({ system, user, maxTokens = 16000, effort }) {
     try {
       if (settings.provider === 'anthropic') {
-        r = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST', headers: this.anthropicHeaders(),
-          body: JSON.stringify({ model: currentModel(), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
-        });
+        const body = { model: currentModel(), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] };
+        if (effort) body.output_config = { effort };
+        const r = await fetchWithTimeout('https://api.anthropic.com/v1/messages', { method: 'POST', headers: this.anthropicHeaders(), body: JSON.stringify(body) });
         const j = await parseResponse(r);
-        return (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+        if (j.stop_reason === 'refusal') throw new Error('the model declined this request' + (j.stop_details && j.stop_details.explanation ? ': ' + j.stop_details.explanation : ''));
+        return { text: (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(''), truncated: j.stop_reason === 'max_tokens' };
       }
-      r = await fetch(this.openaiBase() + '/chat/completions', {
+      const r = await fetchWithTimeout(this.openaiBase() + '/chat/completions', {
         method: 'POST', headers: this.openaiHeaders(),
         body: JSON.stringify({ model: currentModel(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       });
       const j = await parseResponse(r);
-      const content = j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : '';
-      return Array.isArray(content) ? content.map((c) => c.text || '').join('') : String(content || '');
+      const choice = (j.choices && j.choices[0]) || {};
+      if (choice.finish_reason === 'content_filter') throw new Error('the model declined this request');
+      const content = choice.message ? choice.message.content : '';
+      return { text: Array.isArray(content) ? content.map((c) => c.text || '').join('') : String(content || ''), truncated: choice.finish_reason === 'length' };
     } catch (e) { throw networkError(e); }
   },
   async models() {
     try {
       let r, j;
       if (settings.provider === 'anthropic') {
-        r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: this.anthropicHeaders() });
+        r = await fetchWithTimeout('https://api.anthropic.com/v1/models?limit=100', { headers: this.anthropicHeaders() }, 20000);
         j = await parseResponse(r);
       } else {
-        r = await fetch(this.openaiBase() + '/models', { headers: this.openaiHeaders() });
+        r = await fetchWithTimeout(this.openaiBase() + '/models', { headers: this.openaiHeaders() }, 20000);
         j = await parseResponse(r);
       }
       const ids = (j.data || j.models || []).map((m) => m.id || m.name || m.model).filter(Boolean);
@@ -1310,7 +1371,8 @@ function knownSummary() {
   const lines = [];
   for (const d of DIMS) {
     const s = dimStatus(d.id);
-    if (s === 'answered' || s === 'detected') lines.push(`- ${d.label} (${d.id}): ${answerText(state.answers[d.id])}`);
+    if (s === 'answered') lines.push(`- ${d.label} (${d.id}): ${answerText(state.answers[d.id])}`);
+    else if (s === 'detected') lines.push(`- ${d.label} (${d.id}): ${answerText(state.answers[d.id])} (inferred from the description${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
     else if (s === 'delegate') lines.push(`- ${d.label} (${d.id}): (the person said: let the AI decide)`);
     else if (s === 'skipped') lines.push(`- ${d.label} (${d.id}): (the person chose to skip this — do not ask again)`);
   }
@@ -1329,7 +1391,10 @@ function qaSummary() {
 async function aiFetchQuestions() {
   const perRound = state.depth === 'quick' ? 4 : 5;
   const user = `PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
-  const raw = await API.chat({ system: QUESTION_SYSTEM, user, maxTokens: 1500 });
+  // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
+  // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
+  const { text: raw, truncated } = await API.chat({ system: QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low' });
+  if (truncated) throw new Error('the question list was cut off at the token limit');
   const j = extractJSON(raw);
   const qs = Array.isArray(j.questions) ? j.questions : [];
   return qs.filter((q) => q && q.question).slice(0, 6).map((q, i) => ({
@@ -1406,6 +1471,8 @@ function showQuestion(id) {
   const q = questionById(id); if (!q) return;
   state.current = id;
   const existing = getAnswerFor(id);
+  // Keyword hits from the description arrive pre-filled; Next keeps them, or the user edits first.
+  const pre = existing && isUnconfirmed(existing) && q.prefill ? q.prefill(existing.hits) : null;
   const opts = typeof q.options === 'function' ? q.options(state.answers) : (q.options || []);
 
   const askedIdx = state.asked.indexOf(id);
@@ -1421,14 +1488,14 @@ function showQuestion(id) {
   const chips = $('#q-chips');
   chips.innerHTML = opts.map((o) => `<button type="button" class="chip" data-v="${esc(o)}">${esc(o)}</button>`).join('');
   chips.classList.toggle('hidden', !opts.length);
-  const sel = existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.choices || []) : [];
+  const sel = pre ? pre.choices : existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.choices || []) : [];
   $$('.chip', chips).forEach((c) => { if (sel.includes(c.dataset.v)) c.classList.add('selected'); });
 
   const free = $('#q-free');
-  free.value = existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.text || '') : '';
+  free.value = pre ? pre.text : existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.text || '') : '';
   free.placeholder = q.placeholder || (opts.length ? 'Add detail in your own words (optional)' : 'Type your answer…');
   free.classList.toggle('big', !!q.big);
-  const hint = q.hint || (q.kind === 'dim' ? detectHint(q) : '');
+  const hint = q.hint || (pre ? 'Pre-filled from your description — edit it, add to it, or press Next to keep it.' : q.kind === 'dim' ? detectHint(q) : '');
   $('#q-hint').textContent = hint; $('#q-hint').classList.toggle('hidden', !hint);
 
   $('#q-back').classList.toggle('hidden', state.single || (askedIdx <= 0 && !(askedIdx === -1 && state.asked.length)));
@@ -1449,12 +1516,13 @@ async function advance() {
   const i = state.asked.indexOf(state.current);
   if (i >= 0 && i < state.asked.length - 1) { showQuestion(state.asked[i + 1]); return; } // walking forward after "Back"
   let id = nextQuestionId();
-  if (!id && state.aiMode && state.aiRound < maxRounds()) {
+  if (!id && state.aiMode && !state.aiDone) {
     showThinking(state.aiRound === 0 ? 'Reading your idea and working out what to ask…' : 'Checking whether anything important is still missing…');
     try {
       const qs = await aiFetchQuestions();
       state.aiRound++;
       state.aiQuestions.push(...qs);
+      if (!qs.length || state.aiRound >= maxRounds()) state.aiDone = true;
       if (!qs.length && state.aiRound === 1) toast('The AI thinks your description already covers the essentials.');
     } catch (e) {
       console.warn('AI question round failed:', e);
@@ -1467,15 +1535,17 @@ async function advance() {
   if (id) { showQuestion(id); return; }
   await buildResult();
 }
+/** Any changed answer makes the AI-polished text stale. */
+function invalidatePolish() { state.prompt.polished = ''; state.prompt.truncated = false; }
 function onNext() {
   const { q, answer } = readAnswer();
   if (!answer.choices.length && !answer.text) { toast(q.type === 'text' ? 'Type an answer, or use Skip / Let the AI decide' : 'Pick an option, type something, or skip'); return; }
   commitAnswer(state.current, answer);
-  state.prompt.polished = '';
+  invalidatePolish();
   advance();
 }
-function onSkip() { commitAnswer(state.current, { choices: [], text: '', source: 'skipped' }); state.prompt.polished = ''; advance(); }
-function onDelegate() { commitAnswer(state.current, { choices: [], text: '', source: 'delegate' }); state.prompt.polished = ''; advance(); }
+function onSkip() { commitAnswer(state.current, { choices: [], text: '', source: 'skipped' }); invalidatePolish(); advance(); }
+function onDelegate() { commitAnswer(state.current, { choices: [], text: '', source: 'delegate' }); invalidatePolish(); advance(); }
 function onBack() {
   const i = state.asked.indexOf(state.current);
   const prev = i > 0 ? state.asked[i - 1] : (i === -1 && state.asked.length ? state.asked[state.asked.length - 1] : null);
@@ -1555,6 +1625,7 @@ function renderResult() {
 
   const notice = $('#result-notice');
   if (!aiEnabled()) { notice.className = 'notice'; notice.innerHTML = 'Built-in mode. Add a Claude, OpenAI, or local model in <button class="btn sm ghost" type="button" data-open-settings style="display:inline-flex;padding:.1rem .5rem">Settings ⚙</button> for questions tailored to your project and an AI-polished final prompt.'; }
+  else if (p.view === 'polished' && p.polished && p.truncated) { notice.className = 'notice warn'; notice.textContent = "The AI-polished prompt hit the model's output limit and may be cut off at the end. Check it, or polish again."; }
   else notice.className = 'notice hidden';
 
   const s = strength();
@@ -1563,10 +1634,12 @@ function renderResult() {
   for (const d of DIMS) {
     if (d.when && !d.when(state) && !state.answers[d.id]) continue;
     const st = dimStatus(d.id);
-    const cls = st === 'answered' || st === 'detected' ? 'ok' : st;
-    const icon = cls === 'ok' ? '✓' : st === 'delegate' ? '≈' : st === 'skipped' ? '–' : '○';
-    const v = st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
-    cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(d.label)}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${cls === 'ok' ? 'edit' : 'answer'}</button></li>`);
+    const guess = st === 'detected' && isUnconfirmed(state.answers[d.id]);
+    const cls = guess ? 'delegate' : st === 'answered' || st === 'detected' ? 'ok' : st;
+    const icon = cls === 'ok' ? '✓' : cls === 'delegate' ? '≈' : st === 'skipped' ? '–' : '○';
+    const v = guess ? 'from your description' : st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
+    const action = cls === 'ok' ? 'edit' : guess ? 'confirm' : 'answer';
+    cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(d.label)}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${action}</button></li>`);
   }
   $('#coverage').innerHTML = cov.join('');
 }
@@ -1580,12 +1653,13 @@ async function polish() {
   if (!state.prompt.structured) state.prompt.structured = buildStructuredPrompt();
   setPolishing(true);
   try {
-    const raw = await API.chat({ system: POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 4000 });
+    const { text: raw, truncated } = await API.chat({ system: POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000 });
     if (!raw.trim()) throw new Error('empty response');
     state.prompt.polished = cleanMarkdown(raw);
+    state.prompt.truncated = truncated; // a cut-off prompt is still useful; the result screen warns about it
     state.prompt.view = 'polished';
     renderResult(); saveHistory();
-    toast('Polished with AI ✦', 'ok');
+    toast(truncated ? 'Polished, but the model ran out of room — check the end' : 'Polished with AI ✦', truncated ? 'bad' : 'ok');
   } catch (e) {
     console.warn('Polish failed:', e);
     toast('Polish failed — ' + e.message, 'bad');
@@ -1770,7 +1844,8 @@ function init() {
   $('#s-test').addEventListener('click', async () => {
     const out = $('#s-test-result'); out.textContent = 'Testing…';
     try {
-      const reply = await withTempSettings(() => API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 20 }));
+      // Room for thinking tokens, which count against the cap; at 20 the reply itself could be empty.
+      const { text: reply } = await withTempSettings(() => API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 200, effort: 'low' }));
       out.textContent = 'Connected ✓ (model replied: ' + reply.trim().slice(0, 40) + ')';
     } catch (e) { out.textContent = 'Failed: ' + e.message; }
   });
@@ -1784,7 +1859,7 @@ function init() {
   });
   $('#s-wipe').addEventListener('click', () => { if (confirm('Delete your API key, settings, and saved briefs from this browser?')) wipeAll(); });
 
-  window.PromptForge = { state, DIMS, buildStructuredPrompt, settings }; // handy for debugging / customizing
+  window.PromptForge = { state, DIMS, buildStructuredPrompt, settings, toList, deriveTitle }; // handy for debugging / customizing / tests
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>
