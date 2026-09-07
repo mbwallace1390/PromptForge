@@ -21,6 +21,7 @@ const OPEN = process.argv.includes('--open');
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.md': 'text/markdown; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
 };
 
 function openBrowser(url) {

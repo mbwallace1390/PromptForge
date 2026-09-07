@@ -6,6 +6,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const FILE = pathToFileURL(process.env.PF_FILE ? path.resolve(process.env.PF_FILE) : path.join(DIR, '..', 'promptforge.html')).href;
@@ -563,6 +564,62 @@ await test('Test 15: canonicalised AI answers', async () => {
   check(!/I haven't decided on:[^\n]*what you want back/.test(prompt), 'deliverable still listed as unspecified despite the beginner default');
   check(/nothing needs to be saved/i.test(await page.$eval('#sanity', (el) => el.textContent)), 'catalog + "data is lost between uses" did not raise the sanity hint');
   await page.context().close();
+});
+
+// ---------- Test 16: Free & local presets ----------
+await test('Test 16: presets', async () => {
+  const page = await newPage(null);
+  await page.click('#settings-btn');
+  await page.click('#provider-seg [data-p="custom"]');
+  const shown = await page.$eval('#s-preset', (el) => el.value);
+  const url0 = await page.$eval('#s-baseurl', (el) => el.value);
+  log(`  default preset: ${shown} -> ${url0}`);
+  check(shown === 'openrouter' && url0 === 'https://openrouter.ai/api/v1', 'a fresh install should default to OpenRouter (free models)');
+  check(/no card needed/.test(await page.$eval('#preset-help', (el) => el.textContent)) && (await page.$eval('#preset-help a', (el) => el.href)) === 'https://openrouter.ai/keys', 'OpenRouter help or key link missing');
+  await page.selectOption('#s-preset', 'ollama');
+  check((await page.$eval('#s-baseurl', (el) => el.value)) === 'http://localhost:11434/v1', 'Ollama preset did not fill its address');
+  await page.selectOption('#s-preset', 'gemini');
+  check((await page.$eval('#s-baseurl', (el) => el.value)) === 'https://generativelanguage.googleapis.com/v1beta/openai', 'Gemini preset did not fill its address');
+  await page.fill('#s-key', 'k'); await page.click('#settings-save');
+  check((await page.$eval('#ai-badge-text', (el) => el.textContent)) === 'AI: Gemini', 'badge should name the chosen service');
+  const sorted = await page.evaluate(() => window.PromptForge.sortModels(['zeta', 'alpha:free', 'gpt-x', 'beta:free'], 'openrouter'));
+  log('  sortModels: ' + sorted.join(', '));
+  check(sorted.join(',') === 'alpha:free,beta:free,gpt-x,zeta', 'free models should come first, then well-known families');
+  const hints = await page.evaluate(() => [
+    window.PromptForge.localOriginHint({ protocol: 'https:', origin: 'https://mbwallace1390.github.io' }, 'http://localhost:11434/v1'),
+    window.PromptForge.localOriginHint({ protocol: 'file:', origin: 'null' }, 'http://localhost:11434/v1'),
+    window.PromptForge.localOriginHint({ protocol: 'http:', origin: 'http://localhost:5173' }, 'http://localhost:11434/v1'),
+    window.PromptForge.localOriginHint({ protocol: 'https:', origin: 'https://mbwallace1390.github.io' }, 'https://openrouter.ai/api/v1'),
+  ]);
+  check(/setx OLLAMA_ORIGINS "https:\/\/mbwallace1390\.github\.io"/.test(hints[0]), 'hosted page should name the exact OLLAMA_ORIGINS value');
+  check(/PromptForge\.cmd/.test(hints[1]), 'file page should point at the launcher');
+  check(hints[2] === '' && hints[3] === '', 'no hint when the page is on localhost or the server is not local');
+  await page.context().close();
+});
+
+// ---------- Test 17: served over http, the app installs a service worker and opens offline ----------
+await test('Test 17: offline shell', async () => {
+  const port = 5177;
+  const child = spawn(process.execPath, [path.join(DIR, '..', 'serve.mjs')], { env: { ...process.env, PORT: String(port) }, stdio: 'ignore' });
+  try {
+    let up = false;
+    for (let i = 0; i < 50 && !up; i++) { try { up = (await fetch(`http://localhost:${port}/`)).ok; } catch { await new Promise((r) => setTimeout(r, 100)); } }
+    check(up, 'serve.mjs did not come up');
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    await page.goto(`http://localhost:${port}/`);
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 8000 });
+    const manifest = await page.$eval('link[rel="manifest"]', (el) => el.href);
+    check(/manifest\.webmanifest$/.test(manifest) && (await fetch(manifest)).headers.get('content-type') === 'application/manifest+json', 'manifest not linked or served with the wrong type');
+    await ctx.setOffline(true);
+    await page.reload();
+    check(!!(await page.$('#idea')) && /PromptForge/.test(await page.title()), 'app did not open offline from the service worker cache');
+    await ctx.setOffline(false);
+    log('  offline reload rendered the describe screen');
+    await ctx.close();
+  } finally { child.kill(); }
 });
 
 await browser.close();
