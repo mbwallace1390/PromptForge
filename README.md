@@ -18,7 +18,11 @@ Using a model on your own computer (Ollama, LM Studio) from the double-clicked f
 2. **Refine** — before asking anything, keyword detectors read the description. Clear statements (type, platform, audience, experience level, existing project, a project name) are taken as answered and those questions are skipped; looser keyword hits (tech mentioned, constraints, look and feel, outside services) appear in the brief, pre-fill their question, and are confirmed with one press of *Next*. Each remaining question has quick-pick chips, a free-text box, *Skip*, and *Let the AI decide* (which turns into explicit "choose and tell me what you chose" language in the prompt). The "Your brief so far" panel fills in live.
 3. **Your prompt** — a structured Markdown prompt with copy, download, in-place editing, and one-click open in Claude or ChatGPT (copies to the clipboard and pre-fills the page when the prompt is short enough). The coverage list lets the user answer or change any single item without redoing the interview. Anything not specified is called out in a "Things I didn't specify" section so the AI knows to choose sensibly and say so.
 
-### Optional AI mode
+### Changing an existing app
+
+Switch "New idea" to "Change an existing app" on the first screen, or just say so in the description ("add CSV export to my existing Android app", "fix the crash in my bot"). The interview changes: instead of type, platform, audience and data storage it asks what the app is built with, how the AI will get at the code (GitHub link, pasted files, or open in Claude Code / Cursor), what should be different when it's done, what must not change, and how you run and test it today. The prompt comes out as a **Change request** with those sections and three extra rules: read the existing code first and follow its conventions, keep the change as small as the request allows, and say what changed in every file touched. A rewrite or port is treated as a new build with a reference codebase, so it keeps the from-scratch questions.
+
+## Optional AI mode
 
 Open **Settings** and pick a provider:
 

@@ -180,6 +180,7 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .idea-box { max-width: 820px; margin: 0 auto; }
 #idea { min-height: 170px; font-size: 1.02rem; padding: 1rem 1.1rem; border-radius: var(--radius); background: var(--bg-2); box-shadow: var(--shadow-sm); }
 .idea-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .8rem; flex-wrap: wrap; }
+.idea-foot .controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .examples { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; color: var(--muted); font-size: .86rem; }
 .chip {
   display: inline-flex; align-items: center; gap: .4rem;
@@ -280,6 +281,9 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .notice.ok { border-color: var(--ok); background: var(--ok-soft); color: var(--text); }
 .notice.bad { border-color: var(--bad); background: var(--bad-soft); color: var(--text); }
 .notice + .notice { margin-top: .6rem; }
+.polish-status { display: flex; align-items: center; gap: .7rem; border-color: var(--accent); color: var(--text); margin-bottom: .8rem; }
+.polish-status .spin { width: 18px; height: 18px; border: 3px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; flex: none; }
+.polish-status span { flex: 1; }
 .notice ul { margin: .35rem 0 0 1.1rem; padding: 0; }
 .notice li { margin: .2rem 0; }
 .notice li .btn { margin-left: .4rem; vertical-align: middle; }
@@ -338,7 +342,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
   <!-- ================= SCREEN 1: DESCRIBE ================= -->
   <section class="screen" id="screen-describe">
     <div class="hero">
-      <h1>Tell me what you want to build.</h1>
+      <h1>Tell me what you want to build — or change.</h1>
       <p>Write it the way you'd explain it to a friend — messy is fine. I'll ask about anything that's missing, then turn it into a detailed prompt an AI can actually build from.</p>
     </div>
     <div class="idea-box">
@@ -348,9 +352,15 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
         <span>Try an example:</span>
       </div>
       <div class="idea-foot">
-        <div class="depth" id="depth" role="group" aria-label="Interview depth">
-          <button type="button" data-depth="quick" class="on" title="Around 6–8 focused questions">Quick</button>
-          <button type="button" data-depth="thorough" title="Every question — best for bigger projects">Thorough</button>
+        <div class="controls">
+          <div class="depth" id="mode" role="group" aria-label="New idea or a change to an existing app">
+            <button type="button" data-mode="new" class="on" title="Something that doesn't exist yet">New idea</button>
+            <button type="button" data-mode="existing" title="Add to, fix or upgrade an app you already have">Change an existing app</button>
+          </div>
+          <div class="depth" id="depth" role="group" aria-label="Interview depth">
+            <button type="button" data-depth="quick" class="on" title="Around 6–8 focused questions">Quick</button>
+            <button type="button" data-depth="thorough" title="Every question — best for bigger projects">Thorough</button>
+          </div>
         </div>
         <button class="btn primary lg" id="start-btn" type="button">Continue →</button>
       </div>
@@ -418,6 +428,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
       </div>
       <div class="notice hidden" id="result-notice"></div>
       <div class="notice warn hidden" id="sanity"></div>
+      <div class="notice polish-status hidden" id="polish-status" role="status"><div class="spin"></div><span id="polish-status-text"></span><button class="btn ghost sm" id="polish-cancel" type="button">Skip — keep the structured prompt</button></div>
       <div class="prompt-wrap">
         <pre id="prompt-view" tabindex="0"></pre>
         <textarea id="prompt-edit" class="hidden" spellcheck="false"></textarea>
@@ -708,6 +719,21 @@ function typeOf(answers) {
   const a = answers.projectType;
   return a && a.choices && a.choices[0] ? a.choices[0] : null;
 }
+/**
+ * Mode = the Starting point answer. When the project already exists, the interview asks about the code,
+ * what must keep working and how it is run, and the prompt becomes a change request. One source of truth.
+ */
+function isExisting(s = state) {
+  const a = s.answers.startingPoint;
+  if (!a || a.source === 'skipped' || a.source === 'delegate') return false;
+  const c = (a.choices || []).join(' ');
+  // A rewrite or port is a new build with a reference codebase: the from-scratch questions still apply.
+  if (/rewrit|port|migrat|convert/i.test(c)) return false;
+  return /adding to|existing|already|current app/i.test(c);
+}
+/** Question wording can depend on the mode: a DIMS field may be a string or a function of state. */
+const dimText = (v, s = state) => (typeof v === 'function' ? v(s) : v);
+const dimLabel = (d) => dimText(d.label);
 /** "a, b and c" for prose. */
 function listJoin(items) {
   const a = items.map(String);
@@ -719,9 +745,55 @@ const hitsResult = (hits) => (hits.length ? { hits, note: 'from your description
 
 const DIMS = [
   {
+    // First, because the answer decides which interview this is: a new build, or a change to an app that exists.
+    id: 'startingPoint', label: 'Starting point', priority: 'essential', type: 'single',
+    question: 'Are we starting from scratch, or changing something that already exists?',
+    why: "Existing code changes everything — the questions and the prompt are different when the AI has to work with what's there.",
+    options: ['From scratch', 'Adding to an existing project (describe below)', 'Rewriting or porting something (describe below)'],
+    placeholder: 'e.g. Existing Android app in Kotlin, about 5k lines, uses Room for storage.',
+    detect(text) {
+      if (/\b(rewrite|rewriting|port(ing)? (it|this|my|our)|migrat(e|ing)|convert(ing)? (my|our|an existing))\b/i.test(text)) return { choices: ['Rewriting or porting something (describe below)'], note: 'from your description' };
+      // "existing Android app", "add CSV export to my app": allow a word or a few between the cue words.
+      if (/\b(existing (?:[\w-]+ )?(app|project|code|codebase|site|website|system|bot|script|program|tool)|already (have|built|wrote|made|exists)|my current (app|project|code|site)|add(?:ing)? (?:[\w-]+ ){0,4}?to (my|our|an existing)|legacy|refactor|extend(?:ing)? my|upgrad(?:e|ing) (my|our|the)|improv(?:e|ing) (my|our)|updat(?:e|ing) my|new feature (for|in) my|fix(?:ing)? (?:a |the )?(bug|crash|problem|issue) (in|with) (my|our))\b/i.test(text)) return { choices: ['Adding to an existing project (describe below)'], note: 'from your description' };
+      if (/\b(from scratch|brand new|new project|start(ing)? fresh|greenfield)\b/i.test(text)) return { choices: ['From scratch'], note: 'from your description' };
+      return null;
+    },
+    delegate: 'Assume this is a brand-new project.',
+  },
+  {
+    id: 'codeAccess', label: 'Your code', priority: 'essential', type: 'single',
+    when: (s) => isExisting(s),
+    question: 'How will the AI get at your code?',
+    why: "The best change request is useless if the AI can't see what it's changing.",
+    options: ["It's on GitHub — I'll share the link", "I'll paste the files it asks for", "It's open in the AI's editor (Claude Code, Cursor, Copilot)", "I'll describe it — no code sharing"],
+    placeholder: 'e.g. github.com/me/flightlog, or: the app folder is open in Claude Code.',
+    detect(text) {
+      const url = /\b(?:https?:\/\/)?(?:www\.)?(github\.com|gitlab\.com|bitbucket\.org)\/[\w.-]+\/[\w.-]+/i.exec(text);
+      if (url) return { choices: ["It's on GitHub — I'll share the link"], text: url[0].replace(/[.,;:!?)]+$/, ''), note: 'from your description' }; // not the sentence's full stop
+      if (/\b(claude code|cursor|copilot|windsurf|in (the|my) (project|app) folder|open in (my|the) editor)\b/i.test(text)) return { choices: ["It's open in the AI's editor (Claude Code, Cursor, Copilot)"], note: 'from your description' };
+      return null;
+    },
+  },
+  {
+    id: 'preserve', label: 'What must stay the same', priority: 'important', type: 'text', big: true,
+    when: (s) => isExisting(s),
+    question: 'What must not change?',
+    why: 'The AI will happily "improve" things you like. Name what it must leave alone.',
+    placeholder: 'e.g.\nSaved data must still load after the update\nKeep the current look\nDon\'t touch the login flow',
+    delegate: 'Assume everything I have not mentioned must keep working exactly as it does now.',
+  },
+  {
+    id: 'runAndTest', label: 'How you run and test it', priority: 'important', type: 'text',
+    when: (s) => isExisting(s),
+    question: 'How do you run and test it today?',
+    why: 'So the AI can tell you how to check its change the same way you check everything else.',
+    placeholder: 'e.g. npm start; there are Jest tests in /tests; I test on a real phone.',
+    delegate: 'Work out from the code how it is run and tested, and tell me before you change anything.',
+  },
+  {
     id: 'projectType', label: 'Type', priority: 'essential', type: 'single',
-    question: 'What form should this take?',
-    why: 'This decides the tools, the platform, and half of the other questions.',
+    question: (s) => (isExisting(s) ? 'What kind of app is it?' : 'What form should this take?'),
+    why: (s) => (isExisting(s) ? "So the AI knows which platform's rules it is working under." : 'This decides the tools, the platform, and half of the other questions.'),
     options: [...Object.keys(PLATFORM_OPTIONS), NOT_SURE_TYPE],
     detect(text) {
       let hits = TYPE_PATTERNS.filter(([, re]) => re.test(text)).map(([label]) => label);
@@ -737,7 +809,7 @@ const DIMS = [
     id: 'platform', label: 'Platform', priority: 'essential', type: 'multi',
     question: 'Where does it need to run?',
     why: 'The AI will pick very different tools depending on the answer.',
-    when: (s) => { const t = typeOf(s.answers); return !!(t && PLATFORM_OPTIONS[t]); },
+    when: (s) => { if (isExisting(s)) return false; const t = typeOf(s.answers); return !!(t && PLATFORM_OPTIONS[t]); },
     options: (answers) => PLATFORM_OPTIONS[typeOf(answers)] || [],
     detect(text, answers) {
       const t = typeOf(answers);
@@ -776,13 +848,14 @@ const DIMS = [
   },
   {
     id: 'purpose', label: 'Goal', priority: 'essential', type: 'text', big: true,
-    question: "What's the main problem this solves, or the main thing it should help someone do?",
+    question: (s) => (isExisting(s) ? "Why this change — what's wrong or missing today?" : "What's the main problem this solves, or the main thing it should help someone do?"),
     why: "The clearer the goal, the better the AI's decisions on everything you didn't spell out.",
-    placeholder: 'e.g. Right now I keep flight notes in a paper notebook and never know which batteries are getting old.',
+    placeholder: (s) => (isExisting(s) ? 'e.g. Members keep asking for an export; the flight list gets slow past 500 entries.' : 'e.g. Right now I keep flight notes in a paper notebook and never know which batteries are getting old.'),
     when: (s) => wordCount(s.description) < 45 || !PURPOSE_RE.test(s.description),
   },
   {
     id: 'users', label: 'Who it\'s for', priority: 'essential', type: 'single',
+    when: (s) => !isExisting(s), // an existing app already has its users
     question: "Who's going to use this?",
     why: 'A tool for yourself can cut corners a public app can\'t.',
     options: ['Just me', 'Friends or family', 'A club, group or community', 'My team or coworkers', 'Customers or the public', 'Not sure yet'],
@@ -800,14 +873,15 @@ const DIMS = [
     delegate: "Assume a small, friendly audience unless the description suggests otherwise, and tell me what you assumed.",
   },
   {
-    id: 'coreFeatures', label: 'Must-have features', priority: 'essential', type: 'text', big: true,
-    question: 'What must the first version be able to do?',
-    why: "List the essentials, one per line. This becomes the AI's checklist — anything not here is optional.",
-    placeholder: 'e.g.\nLog a flight with date, model and duration\nShow total flights per model\nExport everything to CSV',
-    hint: 'Include things you already mentioned if you want them guaranteed. Details help: what does the user see, click, or get?',
+    id: 'coreFeatures', label: (s) => (isExisting(s) ? 'What should change' : 'Must-have features'), priority: 'essential', type: 'text', big: true,
+    question: (s) => (isExisting(s) ? 'What should be different when this is done?' : 'What must the first version be able to do?'),
+    why: (s) => (isExisting(s) ? "One change per line. This is the AI's checklist — anything not here stays as it is." : "List the essentials, one per line. This becomes the AI's checklist — anything not here is optional."),
+    placeholder: (s) => (isExisting(s) ? 'e.g.\nAdd a dark-mode toggle in Settings\nExport all flights to CSV\nFix the crash when a battery has no name' : 'e.g.\nLog a flight with date, model and duration\nShow total flights per model\nExport everything to CSV'),
+    hint: (s) => (isExisting(s) ? 'Say what the user will see or be able to do afterwards, not how to code it.' : 'Include things you already mentioned if you want them guaranteed. Details help: what does the user see, click, or get?'),
   },
   {
     id: 'data', label: 'Data & accounts', priority: 'important', type: 'single',
+    when: (s) => !isExisting(s), // already decided by the existing app
     question: 'Does it need to remember anything between uses?',
     why: 'Saving data — and where — is one of the biggest design decisions.',
     options: ['Nothing needs to be saved', 'Save on the device only', 'Save online with user accounts / sync', 'Not sure — recommend something'],
@@ -825,21 +899,24 @@ const DIMS = [
     delegate: "I'm not sure what's best for storing data. Choose a sensible, simple approach for this kind of project, explain it in a sentence or two, and avoid anything that needs a paid service unless it's really necessary.",
   },
   {
-    id: 'techStack', label: 'Technology', priority: 'important', type: 'multi', exclusive: 'No preference — pick the best fit',
-    question: 'Any preference on programming language or tools?',
-    why: "If you don't care, say so — the AI will pick something mainstream and well documented.",
-    options: ['No preference — pick the best fit', 'Python', 'JavaScript / TypeScript', 'Kotlin / Android', 'Swift / iOS', 'C# / .NET', 'Java', 'Rust', 'C / C++', 'Lua', 'Other (say which)'],
-    placeholder: 'e.g. It has to match my existing Kotlin app, or: I want to learn Python so use that.',
+    id: 'techStack', label: (s) => (isExisting(s) ? 'Built with' : 'Technology'), priority: (s) => (isExisting(s) ? 'essential' : 'important'), type: 'multi', exclusive: 'No preference — pick the best fit',
+    question: (s) => (isExisting(s) ? 'What is it built with?' : 'Any preference on programming language or tools?'),
+    why: (s) => (isExisting(s) ? 'The AI must match what is already there — language, framework, storage.' : "If you don't care, say so — the AI will pick something mainstream and well documented."),
+    options: () => (isExisting() ? [] : ['No preference — pick the best fit']).concat(['Python', 'JavaScript / TypeScript', 'Kotlin / Android', 'Swift / iOS', 'C# / .NET', 'Java', 'Rust', 'C / C++', 'Lua', 'Other (say which)']),
+    placeholder: (s) => (isExisting(s) ? 'e.g. Kotlin with Room for storage, Retrofit for the API; built in Android Studio.' : 'e.g. It has to match my existing Kotlin app, or: I want to learn Python so use that.'),
     detect(text) { return hitsResult(STACK_PATTERNS.filter(([, re]) => re.test(text)).map(([l]) => l)); },
-    prefill: (hits) => ({ choices: [], text: `Use ${hits.join(', ')}.` }),
-    delegate: 'No strong preference. Choose the most appropriate mainstream, well-documented stack for this kind of project and explain your choice in a short paragraph.',
+    prefill: (hits) => ({ choices: [], text: isExisting() ? `${hits.join(', ')}.` : `Use ${hits.join(', ')}.` }),
+    delegate: (s) => (isExisting(s) ? 'Work out what it is built with from the code and stick to that.' : 'No strong preference. Choose the most appropriate mainstream, well-documented stack for this kind of project and explain your choice in a short paragraph.'),
   },
   {
     id: 'deliverable', label: 'What you want back', priority: 'important', type: 'single',
     question: 'What do you want the AI to give you?',
     why: 'Sets expectations for the first reply.',
-    options: ['Complete, working code', 'A build plan first, then the code', 'A single file I can run right away', 'Just the plan / architecture', 'Build it step by step and explain as you go'],
+    options: () => (isExisting()
+      ? ['Full updated files', 'Only the changed parts (a patch / diff)', 'Step-by-step edits I make myself', 'A plan first, then the changes']
+      : ['Complete, working code', 'A build plan first, then the code', 'A single file I can run right away', 'Just the plan / architecture', 'Build it step by step and explain as you go']),
     detect(text) {
+      if (isExisting()) return null; // the from-scratch phrases below do not apply to a change
       if (/\b(single file|one file|one html file)\b/i.test(text)) return { choices: ['A single file I can run right away'], note: 'from your description' };
       if (/\b(step[- ]by[- ]step|walk me through|explain (as you go|everything))\b/i.test(text)) return { choices: ['Build it step by step and explain as you go'], note: 'from your description' };
       if (/\b(just (the |a )?plan|architecture only|no code yet)\b/i.test(text)) return { choices: ['Just the plan / architecture'], note: 'from your description' };
@@ -861,20 +938,6 @@ const DIMS = [
     delegate: 'Assume I have some experience but explain anything unusual.',
   },
   {
-    id: 'startingPoint', label: 'Starting point', priority: 'important', type: 'single',
-    question: 'Are we starting from scratch, or building on something that exists?',
-    why: "Existing code changes everything — the AI needs to know what it's working with.",
-    options: ['From scratch', 'Adding to an existing project (describe below)', 'Rewriting or porting something (describe below)'],
-    placeholder: 'e.g. Existing Android app in Kotlin, about 5k lines, uses Room for storage. Repo: github.com/…',
-    detect(text) {
-      if (/\b(rewrite|rewriting|port(ing)? (it|this|my|our)|migrat(e|ing)|convert(ing)? (my|our|an existing))\b/i.test(text)) return { choices: ['Rewriting or porting something (describe below)'], note: 'from your description' };
-      if (/\b(existing (app|project|code|codebase|site|website|system)|already (have|built|wrote|made)|my current (app|project|code|site)|add(ing)? (this |a feature |features )?to (my|our|an existing)|legacy|refactor|extend(ing)? my|upgrade my)\b/i.test(text)) return { choices: ['Adding to an existing project (describe below)'], note: 'from your description' };
-      if (/\b(from scratch|brand new|new project|start(ing)? fresh|greenfield)\b/i.test(text)) return { choices: ['From scratch'], note: 'from your description' };
-      return null;
-    },
-    delegate: 'Assume this is a brand-new project.',
-  },
-  {
     id: 'constraints', label: 'Constraints', priority: 'important', type: 'multi', exclusive: 'None I can think of',
     question: 'Any hard requirements or limitations?',
     why: 'Things like "must work offline" or "no paid services" are cheap to say now and expensive to discover later.',
@@ -886,6 +949,7 @@ const DIMS = [
   },
   {
     id: 'design', label: 'Look & feel', priority: 'important', type: 'multi', exclusive: "Function over form — don't care much",
+    when: (s) => !isExisting(s), // "keep the current look" belongs under what must stay the same
     question: 'How should it look and feel?',
     why: 'Even a rough steer ("clean, dark, big buttons") saves a lot of back-and-forth.',
     options: ['Clean and minimal', 'Modern and polished', 'Fun and colorful', 'Dark mode', 'Big, simple controls', 'Match an existing app or brand (describe)', "Function over form — don't care much"],
@@ -1025,9 +1089,9 @@ function pendingDims() {
     if (state.answers[d.id] && state.answers[d.id].source === 'skipped') return false;
     if (d.when && !d.when(state)) return false;
     return true;
-  }).sort((a, b) => order[a.priority] - order[b.priority]);
+  }).sort((a, b) => order[dimText(a.priority)] - order[dimText(b.priority)]);
   if (state.depth === 'quick' && !state.single) {
-    list = list.filter((d) => d.priority !== 'optional');
+    list = list.filter((d) => dimText(d.priority) !== 'optional');
     const askedDims = state.asked.filter((id) => DIM_BY_ID[id]).length;
     list = list.slice(0, Math.max(0, QUICK_LIMIT - askedDims));
   }
@@ -1039,7 +1103,7 @@ function nextQuestionId() {
   if (state.aiMode) {
     // Our curated essentials (type, platform, goal, who, features) come first, with their chips: a weak
     // model must not steer the basics. The AI then asks about what is still unknown.
-    const ess = pendingDims().filter((d) => d.priority === 'essential');
+    const ess = pendingDims().filter((d) => dimText(d.priority) === 'essential');
     if (ess.length) return ess[0].id;
     const ai = pendingAi();
     if (ai.length) return ai[0].id;
@@ -1049,7 +1113,10 @@ function nextQuestionId() {
   return p.length ? p[0].id : null;
 }
 function questionById(id) {
-  if (DIM_BY_ID[id]) return { kind: 'dim', ...DIM_BY_ID[id] };
+  if (DIM_BY_ID[id]) {
+    const d = DIM_BY_ID[id]; // wording can depend on the mode; resolve it once here
+    return { kind: 'dim', ...d, label: dimLabel(d), question: dimText(d.question), why: dimText(d.why), placeholder: dimText(d.placeholder), hint: dimText(d.hint), delegate: dimText(d.delegate) };
+  }
   const q = state.aiQuestions.find((x) => x.id === id);
   if (!q) return null;
   return {
@@ -1112,7 +1179,7 @@ function strength() {
   let got = 0, total = 0;
   for (const d of DIMS) {
     if (d.when && !d.when(state) && !state.answers[d.id]) continue; // not applicable
-    const w = PRIORITY_WEIGHT[d.priority];
+    const w = PRIORITY_WEIGHT[dimText(d.priority)];
     total += w;
     const s = dimStatus(d.id);
     if (s === 'detected' && isUnconfirmed(state.answers[d.id])) got += w * 0.6; // a keyword guess is worth as much as "AI decides"
@@ -1128,7 +1195,7 @@ function strength() {
 /* ---------- 5. Structured prompt builder ---------- */
 const val = (id) => (hasContent(state.answers[id]) && state.answers[id].source !== 'delegate') ? answerText(state.answers[id]) : '';
 const delegated = (id) => dimStatus(id) === 'delegate';
-const delegateLine = (id) => DIM_BY_ID[id].delegate || 'Use your best judgment here and tell me what you chose.';
+const delegateLine = (id) => dimText(DIM_BY_ID[id].delegate) ||'Use your best judgment here and tell me what you chose.';
 const section = (title, body) => (body && String(body).trim() ? `## ${title}\n${String(body).trim()}\n\n` : '');
 const has = (s, re) => re.test(s || '');
 
@@ -1200,8 +1267,15 @@ const isBeginner = () => !delegated('skillLevel') && has(val('skillLevel'), BEGI
 const beginnerDeliverable = () => isBeginner() && dimStatus('deliverable') === 'missing';
 function deliverableBody() {
   if (delegated('deliverable')) return delegateLine('deliverable');
-  const t = val('deliverable'); if (!t) return beginnerDeliverable() ? BEGINNER_DELIVERABLE : '';
+  const t = val('deliverable');
+  if (!t) return beginnerDeliverable() ? (isExisting() ? "I'm new to this, so give me the complete updated version of every file you change, with exact steps to put them in place and run the app." : BEGINNER_DELIVERABLE) : '';
   if (viaAi(state.answers.deliverable)) return aiQuoted(state.answers.deliverable);
+  // Change-request chips
+  if (has(t, /full updated files/i)) return 'Give me the complete updated version of every file you change, each with its path, so I can replace files one for one.';
+  if (has(t, /changed parts|patch|diff/i)) return 'Give me only the changed parts as a diff, with the file path above each hunk, so I can apply them myself.';
+  if (has(t, /step-by-step edits/i)) return 'Walk me through the edits one file at a time: what to open, what to change, and how to check it — and wait for my go-ahead between files.';
+  if (has(t, /then the changes/i)) return 'First, a short plan of the change: which files, what changes in each, in what order. Once I confirm it, the changes themselves.';
+  // New-build chips
   if (has(t, /single file/i)) return 'A single self-contained file I can open or run immediately, with no build step if at all possible.';
   if (has(t, /plan first|then the code/i)) return 'First, a short build plan (architecture, files, order of work). Once I confirm it, the complete code.';
   if (has(t, /just the plan|architecture/i)) return 'A plan and architecture only — no code yet. Describe the components, the data model, the key decisions, and the order you would build things in.';
@@ -1275,14 +1349,88 @@ function typeLines() {
 function unspecifiedDims() {
   return DIMS.filter((d) => {
     if (d.when && !d.when(state)) return false;
-    if (['name', 'niceToHave', 'outOfScope', 'successCriteria', 'purpose'].includes(d.id)) return false;
+    if (['name', 'niceToHave', 'outOfScope', 'successCriteria', 'purpose', 'preserve'].includes(d.id)) return false; // preserve has a stated default
     if (d.id === 'deliverable' && beginnerDeliverable()) return false; // covered by the beginner default
     const s = dimStatus(d.id);
     return s === 'missing' || s === 'skipped';
   });
 }
 
+/** The technology section for either mode: chips, free text, keyword hits or an AI answer, phrased for the prompt. */
+function techBody() {
+  if (delegated('techStack')) return delegateLine('techStack');
+  const a = state.answers.techStack; if (!hasContent(a)) return '';
+  if (viaAi(a)) return aiQuoted(a);
+  if (isUnconfirmed(a)) return isExisting() ? `${listJoin(a.hits)} (from my description).` : `I mentioned ${listJoin(a.hits)} in my description. Use those unless there's a strong reason not to, and tell me if so.`;
+  const choices = (a.choices || []).filter((c) => !/no preference|other \(say which\)/i.test(c));
+  const extra = (a.text || '').trim();
+  let s = '';
+  if ((a.choices || []).some((c) => /no preference/i.test(c)) && !choices.length) s = delegateLine('techStack');
+  else if (choices.length) s = isExisting() ? `${choices.join(', ')}.` : `Please use: ${choices.join(', ')}.`;
+  if (extra) s += (s ? ' ' : '') + extra;
+  return s;
+}
+/** How the AI reaches the code of an existing app, as an instruction it can act on. */
+function codeAccessBody() {
+  const a = state.answers.codeAccess; if (!hasContent(a)) return '';
+  if (viaAi(a)) return aiQuoted(a);
+  const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
+  if (/github/i.test(c)) return `The code is on GitHub${extra ? ` (${extra})` : ' — I will share the link'}. Read the relevant parts before proposing changes.`;
+  if (/paste/i.test(c)) return "I'll paste the files you ask for. Tell me which files you need to see before you change anything, and never guess at code you haven't seen." + (extra ? ' ' + extra : '');
+  if (/editor/i.test(c)) return 'You have the project open in your editor. Explore it before changing anything: the structure, the conventions, how it is built and run.' + (extra ? ' ' + extra : '');
+  if (/describe/i.test(c)) return "You won't see the code. Work from my description, state every assumption you make about names and structure, and give me changes I can apply by hand." + (extra ? ' ' + extra : '');
+  return answerText(a);
+}
+function preserveBody() {
+  if (delegated('preserve')) return delegateLine('preserve');
+  const items = toList(val('preserve'));
+  return items.length ? items.map((i) => `- ${i}`).join('\n') : '';
+}
+function runAndTestBody() {
+  if (delegated('runAndTest')) return delegateLine('runAndTest');
+  return val('runAndTest');
+}
+/** A change to an app that exists: what it is, how to reach it, what changes, what must not. */
+function buildChangeRequest() {
+  let out = `# Change request: ${deriveTitle()}\n\n`;
+  let what = state.description.trim();
+  const purpose = val('purpose');
+  if (purpose) what += `\n\nWhy: ${purpose}`;
+  out += section('What I want changed', what);
+
+  const app = [];
+  if (delegated('projectType')) app.push(`- **Kind:** ${delegateLine('projectType')}`);
+  else if (val('projectType')) app.push(`- **Kind:** ${val('projectType')}`);
+  const tech = techBody(); if (tech) app.push(`- **Built with:** ${tech}`);
+  const access = codeAccessBody(); if (access) app.push(`- **The code:** ${access}`);
+  const sp = state.answers.startingPoint; const spText = sp && (sp.text || '').trim();
+  if (spText) app.push(`- **About it:** ${spText}`);
+  out += section('The existing app', app.join('\n'));
+
+  const changes = toList(val('coreFeatures'));
+  out += section('What should change', changes.length
+    ? changes.map((c, i) => `${i + 1}. ${c}`).join('\n') + '\n\nThis list is the whole request. Nothing else changes unless I say so.'
+    : "I haven't listed the changes separately — work from the description above. Before you change anything, write out the changes you believe I'm asking for as a numbered list and confirm them with me.");
+  out += section('What must stay the same', preserveBody() || 'Everything I have not mentioned must keep working exactly as it does now, including how saved data loads.');
+  out += section('How I run and test it', runAndTestBody());
+
+  out += section('Connections to other services or devices', integrationsBody());
+  out += section('Requirements and constraints', constraintsBody());
+  const nice = toList(val('niceToHave'));
+  if (nice.length) out += section('Nice to have (only after the changes work)', nice.map((n) => `- ${n}`).join('\n'));
+  const oos = toList(val('outOfScope'));
+  if (oos.length) out += section('Out of scope (please do not touch these)', oos.map((o) => `- ${o}`).join('\n'));
+  out += section('What I want from you', deliverableBody());
+  if (val('successCriteria')) out += section("How I'll know it's done", val('successCriteria'));
+  if (state.extraQA.length) out += section('Additional details', state.extraQA.map((x) => `**${x.q}**\n${x.a}`).join('\n\n'));
+
+  out += section("Things I didn't specify", unspecifiedBody());
+  out += section('How to work with me', rulesBody());
+  return out.trim() + '\n';
+}
+
 function buildStructuredPrompt() {
+  if (isExisting()) return buildChangeRequest();
   const title = deriveTitle();
   let out = `# Build request: ${title}\n\n`;
 
@@ -1309,21 +1457,7 @@ function buildStructuredPrompt() {
   out += section('Data and accounts', dataBody());
   out += section('Connections to other services or devices', integrationsBody());
 
-  if (delegated('techStack')) out += section('Technology', delegateLine('techStack'));
-  else if (val('techStack')) {
-    const a = state.answers.techStack;
-    let s = '';
-    if (viaAi(a)) s = aiQuoted(a);
-    else if (isUnconfirmed(a)) s = `I mentioned ${listJoin(a.hits)} in my description. Use those unless there's a strong reason not to, and tell me if so.`;
-    else {
-      const choices = (a.choices || []).filter((c) => !/no preference|other \(say which\)/i.test(c));
-      const extra = (a.text || '').trim();
-      if ((a.choices || []).some((c) => /no preference/i.test(c)) && !choices.length) s = delegateLine('techStack');
-      else if (choices.length) s = `Please use: ${choices.join(', ')}.`;
-      if (extra) s += (s ? ' ' : '') + extra;
-    }
-    out += section('Technology', s);
-  }
+  out += section('Technology', techBody());
 
   out += section('Look and feel', designBody());
   out += section('Requirements and constraints', constraintsBody());
@@ -1344,13 +1478,18 @@ function buildStructuredPrompt() {
 /** The two sections that make or break the prompt. Written by us, and pinned back onto any AI rewrite. */
 function unspecifiedBody() {
   const unspec = unspecifiedDims();
-  return unspec.length ? `I haven't decided on: ${unspec.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result. If anything above seems to settle one of these, treat it as open anyway; this list wins.` : '';
+  return unspec.length ? `I haven't decided on: ${unspec.map((d) => dimLabel(d).toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result. If anything above seems to settle one of these, treat it as open anyway; this list wins.` : '';
 }
 function rulesBody() {
   const rules = [];
   const skill = skillBody(); if (skill) rules.push(skill);
+  if (isExisting()) {
+    rules.push('Read the existing code before proposing anything, and follow its conventions — naming, structure, libraries — rather than introducing new ones.');
+    rules.push("Keep the change as small as the request allows. Touch only what it needs; don't refactor or \"clean up\" unrelated code.");
+    rules.push('For every file you change, say what changed and why.');
+  }
   rules.push("Before you write any code, restate your understanding of this project in a few sentences and list the assumptions you're making. If something is unclear and would significantly change the outcome, ask me — otherwise make a reasonable choice and tell me what you chose.");
-  rules.push('Build the must-have features first and get them working end to end before touching anything optional.');
+  rules.push(isExisting() ? 'Make the requested changes first and get them working end to end before touching anything optional.' : 'Build the must-have features first and get them working end to end before touching anything optional.');
   rules.push('Keep the code organized and commented so it can be maintained later.');
   rules.push("When you're done, tell me exactly how to run it and how to test that each must-have feature works.");
   rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
@@ -1412,6 +1551,12 @@ const LOOKS_UP_RE = /\b(look(?:s|ed)? ?up|lookup|search(?:es)?|find(?:s)?|see(?:
 const HAS_SOURCE_RE = /\b(add(?:s|ing)?|enter(?:s|ing)?|type in|creat(?:e|es|ing)|record(?:s|ing)?|log(?:s|ging)?|import(?:s|ed|ing)?|upload(?:s|ed|ing)?|fetch(?:es|ed|ing)?|pull(?:s|ed|ing)?|sync(?:s|ed|ing)?|scan(?:s|ned|ning)?|api|database|spreadsheet|csv|json|xml|file|paste[ds]?|manual(?:ly)? (?:input|entry|entered)|(?:from|via) (?:a|an|the)? ?(?:website|service|site|catalog(?:ue)?|library system|internet|open library|google books|goodreads|wikipedia))\b/i;
 function sanityHints() {
   const hints = [];
+  if (isExisting()) {
+    // The from-scratch data questions do not apply; the one thing that sinks a change request is the AI not seeing the code.
+    const access = ((state.answers.codeAccess || {}).choices || []).join(' ');
+    if (/describe/i.test(access)) hints.push({ dim: 'codeAccess', text: "Without seeing the code, the AI will guess at file names and structure, and its changes may not apply cleanly. If you can, share the repo or paste the files it asks for." });
+    return hints;
+  }
   const everything = [state.description, val('purpose'), val('coreFeatures'), val('integrations')].join('\n');
   const work = [state.description, val('purpose'), val('coreFeatures')].join('\n'); // what the app does, in the person's own words
   if (dataMode(state.answers.data) === 'none' && KEEPS_RECORDS_RE.test(work)) {
@@ -1441,6 +1586,7 @@ Guidelines:
 - Give 2–5 short quick-pick options when sensible. When the person may not know, include an option like "Not sure — you decide".
 - Priority: what it is and who it is for → must-have features and how they behave → data and accounts → connections to other services → platform and technology → look and feel → constraints → what to deliver and the person's experience level.
 - Most important first. If the brief is already complete enough for a strong build prompt, return an empty list.
+- If the brief is a change to an app that already exists (the starting point or a MODE line says so), ask about the existing code, what must keep working, and how it is run and tested — never about building it from scratch.
 - "covers" must be one of the dimension ids listed under STILL UNKNOWN when the question is about that topic, otherwise "other".
 
 Return ONLY JSON, no prose, exactly in this shape:
@@ -1474,6 +1620,7 @@ Rules:
 - If you add any detail the person did not give — a feature, a data source, a hosting choice, a style, a constraint — append " (suggested)" to it so they can delete it. Never present your own suggestion as their requirement.
 - Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
 - Use Markdown headings ("## Section") for sections, never bold lines, and never add sub-headings such as "Overview" inside a section. Structure: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
+- If the draft is a "Change request" for an app that already exists, use this structure instead: title; what I want changed and why; the existing app (what it is, what it is built with, how you reach the code); what should change, numbered; what must stay the same; how I run and test it; then connections, constraints, out of scope, what to deliver, success criteria, open questions.
 - Do not write a "How to work with me" section or a "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Both sections are appended afterwards exactly as the person wrote them.
 - Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
 - Output only the prompt, in Markdown.`;
@@ -1677,15 +1824,15 @@ function knownSummary() {
   const lines = [];
   for (const d of DIMS) {
     const s = dimStatus(d.id);
-    if (s === 'answered') lines.push(`- ${d.label} (${d.id}): ${answerText(state.answers[d.id])}`);
-    else if (s === 'detected') lines.push(`- ${d.label} (${d.id}): ${answerText(state.answers[d.id])} (inferred from the description${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
-    else if (s === 'delegate') lines.push(`- ${d.label} (${d.id}): (the person said: let the AI decide)`);
-    else if (s === 'skipped') lines.push(`- ${d.label} (${d.id}): (the person chose to skip this — do not ask again)`);
+    if (s === 'answered') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])}`);
+    else if (s === 'detected') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])} (inferred from the description${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
+    else if (s === 'delegate') lines.push(`- ${dimLabel(d)} (${d.id}): (the person said: let the AI decide)`);
+    else if (s === 'skipped') lines.push(`- ${dimLabel(d)} (${d.id}): (the person chose to skip this — do not ask again)`);
   }
   return lines;
 }
 function unknownSummary() {
-  return DIMS.filter((d) => !state.answers[d.id] && !(d.when && !d.when(state))).map((d) => `- ${d.id}: ${d.label} — "${d.question}"`);
+  return DIMS.filter((d) => !state.answers[d.id] && !(d.when && !d.when(state))).map((d) => `- ${d.id}: ${dimLabel(d)} — "${dimText(d.question)}"`);
 }
 function qaSummary() {
   return state.aiQuestions.filter((q) => q.answer).map((q) => {
@@ -1696,7 +1843,8 @@ function qaSummary() {
 }
 async function aiFetchQuestions() {
   const perRound = state.depth === 'quick' ? 3 : 5; // the built-in essentials already took a few slots in quick mode
-  const user = `PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
+  const mode = isExisting() ? 'MODE: change to an existing app — ask about the existing code, what must keep working, and how it is run and tested; never about building it from scratch.\n\n' : '';
+  const user = `${mode}PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
   // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
   // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
   const { text: raw, truncated } = await API.chat({ system: QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low', schema: QUESTION_SCHEMA });
@@ -1710,15 +1858,15 @@ async function aiFetchQuestions() {
     options: Array.isArray(q.options) ? q.options.map((o) => String(o).trim()).filter(Boolean).slice(0, 6) : [],
     allowMultiple: !!q.allowMultiple,
     covers: DIM_BY_ID[q.covers] ? q.covers : 'other',
-    label: q.label ? String(q.label).trim() : (DIM_BY_ID[q.covers] ? DIM_BY_ID[q.covers].label : shortLabel(q.question)),
+    label: q.label ? String(q.label).trim() : (DIM_BY_ID[q.covers] ? dimLabel(DIM_BY_ID[q.covers]) : shortLabel(q.question)),
   }));
 }
 function polishUserMessage() {
   const lines = [];
   for (const d of DIMS) {
     const s = dimStatus(d.id);
-    if (s === 'answered' || s === 'detected') lines.push(`${d.label}: ${answerText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
-    else if (s === 'delegate') lines.push(`${d.label}: let the AI decide`);
+    if (s === 'answered' || s === 'detected') lines.push(`${dimLabel(d)}: ${answerText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
+    else if (s === 'delegate') lines.push(`${dimLabel(d)}: let the AI decide`);
   }
   for (const x of state.extraQA) lines.push(`${x.q}: ${x.a}`);
   return `PROJECT DESCRIPTION (the person's own words):\n${state.description}\n\nANSWERS TO FOLLOW-UP QUESTIONS:\n${lines.join('\n') || '(none)'}\n\nSTRUCTURED DRAFT PROMPT:\n${state.prompt.structured}`;
@@ -1763,7 +1911,7 @@ function renderBrief() {
     else if (s === 'skipped') { v = 'Skipped'; cls = 'faint'; }
     else v = answerText(a);
     const pill = s === 'detected' ? '<span class="pill detected">detected</span>' : s === 'delegate' ? '<span class="pill delegate">AI decides</span>' : s === 'skipped' ? '<span class="pill skipped">skipped</span>' : a.via === 'ai' ? '<span class="pill ai">✦</span>' : '';
-    items.push(`<li class="brief-item"><div class="k"><span>${esc(d.label)}</span>${pill}</div><div class="v ${cls}">${esc(v)}</div></li>`);
+    items.push(`<li class="brief-item"><div class="k"><span>${esc(dimLabel(d))}</span>${pill}</div><div class="v ${cls}">${esc(v)}</div></li>`);
   }
   for (const x of state.extraQA) items.push(`<li class="brief-item"><div class="k"><span>${esc(x.q)}</span><span class="pill ai">✦</span></div><div class="v">${esc(x.a)}</div></li>`);
   $('#brief-list').innerHTML = items.join('') || '<li class="brief-empty">Answers will appear here as you go.</li>';
@@ -1885,6 +2033,14 @@ async function startInterview() {
   state.depth = settings.depth || 'quick';
   state.aiMode = aiEnabled();
   runDetection();
+  // The switch on the first screen sets the starting point unless the description already made it clear.
+  const wantsExisting = !!$('#mode button.on') && $('#mode button.on').dataset.mode === 'existing';
+  if (wantsExisting && !isExisting()) {
+    state.answers.startingPoint = { choices: ['Adding to an existing project (describe below)'], text: '', source: 'user' };
+    runDetection(); // detectors that depend on the mode (code access) can run now
+  } else if (!wantsExisting && isExisting()) {
+    toast('Sounds like a change to an existing app — asking the questions for that. Not right? Change the Starting point answer in the brief.', '', 6000);
+  }
   showScreen('refine');
   renderBrief();
   await advance();
@@ -1957,14 +2113,25 @@ function renderResult() {
     const icon = cls === 'ok' ? '✓' : cls === 'delegate' ? '≈' : st === 'skipped' ? '–' : '○';
     const v = guess ? 'from your description' : st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
     const action = cls === 'ok' ? 'edit' : guess ? 'confirm' : 'answer';
-    cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(d.label)}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${action}</button></li>`);
+    cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(dimLabel(d))}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${action}</button></li>`);
   }
   $('#coverage').innerHTML = cov.join('');
+}
+let polishTimer = null, polishStarted = 0, polishWords = -1;
+/** The status line above the prompt: a busy model can take twenty seconds before its first word, and a silent screen reads as frozen. */
+function renderPolishStatus() {
+  const secs = Math.round((Date.now() - polishStarted) / 1000);
+  $('#polish-status-text').textContent = polishWords < 0
+    ? `Polishing with AI — waiting for the first words… ${secs}s${secs >= 20 ? ' (free models can be slow when busy)' : ''}`
+    : `Polishing with AI — writing… ${polishWords} words so far, ${secs}s`;
 }
 function setPolishing(on) {
   const b = $('#polish-btn');
   b.disabled = on; b.innerHTML = on ? '<span class="spin"></span> Polishing…' : (state.prompt.polished ? '✦ Polish again' : '✦ Polish with AI');
   $('#tab-polished').disabled = on || !state.prompt.polished;
+  clearInterval(polishTimer); polishTimer = null;
+  if (on) { polishStarted = Date.now(); polishWords = -1; renderPolishStatus(); polishTimer = setInterval(renderPolishStatus, 1000); }
+  $('#polish-status').classList.toggle('hidden', !on);
 }
 let polishCtl = null; // the in-flight polish, so a newer one (or a restart) can cancel it
 function cancelPolish() { if (polishCtl) { polishCtl.abort(); polishCtl = null; setPolishing(false); } }
@@ -1985,6 +2152,7 @@ async function polish() {
     if (!shown) { shown = true; state.prompt.view = 'polished'; $('#tab-polished').classList.add('on'); $('#tab-structured').classList.remove('on'); }
     if (state.prompt.view !== 'polished') return; // the reader switched back to the structured tab
     latest = stripOpenFence(text);
+    polishWords = wordCount(latest); renderPolishStatus();
     if (!frame) frame = requestAnimationFrame(paint); // one repaint per frame, however fast tokens land
   };
   try {
@@ -2165,6 +2333,7 @@ const EXAMPLES = [
   'A simple Android app for my RC club where members log flights and track battery cycles. No login needed to view.',
   'A Discord bot that posts the weather for our field every morning and lets people say if they are flying.',
   'A little desktop program that watches a folder and renames my 3D printer files by date and model.',
+  "Add CSV export to my existing Android app. It's Kotlin with Room, and the code is on GitHub.",
 ];
 function init() {
   refreshAiBadge();
@@ -2176,6 +2345,7 @@ function init() {
   $('#idea').addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') startInterview(); });
   $('#examples').addEventListener('click', (e) => { const b = e.target.closest('[data-ex]'); if (b) { $('#idea').value = b.dataset.ex; $('#idea').focus(); } });
   $('#depth').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; settings.depth = b.dataset.depth; saveSettings(); $$('#depth button').forEach((x) => x.classList.toggle('on', x === b)); });
+  $('#mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#mode button').forEach((x) => x.classList.toggle('on', x === b)); });
   $('#recent-list').addEventListener('click', (e) => { const l = e.target.closest('[data-load]'); if (l) return loadHistory(l.dataset.load); const d = e.target.closest('[data-del]'); if (d) deleteHistory(d.dataset.del); });
   $('#clear-history').addEventListener('click', () => { store.del('pf_history'); renderRecent(); });
 
@@ -2197,6 +2367,7 @@ function init() {
   for (const id of ['#coverage', '#sanity']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) { cancelPolish(); askSingle(b.dataset.ask); } });
   $('#more-btn').addEventListener('click', () => { cancelPolish(); answerMore(); });
   $('#polish-btn').addEventListener('click', polish);
+  $('#polish-cancel').addEventListener('click', () => { cancelPolish(); state.prompt.view = 'structured'; renderResult(); toast('Kept the structured prompt. Polish with AI is in the side panel if you change your mind.'); });
   $('#restart-btn').addEventListener('click', () => { cancelPolish(); resetState(); $('#idea').value = ''; showScreen('describe'); $('#idea').focus(); });
   $('#result-notice').addEventListener('click', (e) => { if (e.target.closest('[data-open-settings]')) openSettings(); });
 

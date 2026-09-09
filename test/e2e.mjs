@@ -149,7 +149,9 @@ async function answerLoop(page, maxSteps = 20) {
     const chips = await page.$$eval('#q-chips .chip', (els) => els.map((e) => e.textContent));
     asked.push(q);
     log(`  [${pos}] ${q}${hint ? '  (hint: ' + hint + ')' : ''}${chips.length ? '\n      chips: ' + chips.join(' | ') : ''}`);
-    if (chips.length) {
+    if (/starting from scratch/i.test(q)) {
+      await page.click('#q-chips .chip >> nth=0'); // From scratch — chip 1 would switch the interview to existing-app mode
+    } else if (chips.length) {
       await page.click('#q-chips .chip >> nth=' + Math.min(1, chips.length - 1));
       if (/tools|language/i.test(q)) await page.fill('#q-free', 'It should match my existing Kotlin code.');
     } else if (/must the first version/i.test(q)) {
@@ -179,6 +181,18 @@ async function skipUntilToast(page, re, maxSteps = 8) {
     await page.click('#q-skip');
   }
   return await page.$eval('#toast', (el) => el.textContent);
+}
+/** Like skipUntil, but records every question it passes so a test can assert what was (not) asked. */
+async function walkUntil(page, re, asked, maxSteps = 15) {
+  for (let i = 0; i < maxSteps; i++) {
+    await page.waitForFunction(() => !document.querySelector('#screen-result').classList.contains('hidden') || !document.querySelector('#qcard').classList.contains('hidden'), null, { timeout: 8000 });
+    if (!(await page.$eval('#screen-result', (el) => el.classList.contains('hidden')))) return false;
+    const q = await page.$eval('#q-text', (el) => el.textContent);
+    if (asked[asked.length - 1] !== q) asked.push(q);
+    if (re.test(q)) return true;
+    await page.click('#q-skip');
+  }
+  return false;
 }
 /** Press Skip until the question whose text matches `re` is on screen (or the result screen appears). */
 async function skipUntil(page, re, maxSteps = 15) {
@@ -468,7 +482,10 @@ await test('Test 11: streaming polish', async () => {
   const partial = await promptText(page);
   log(`  partial text visible mid-stream: ${JSON.stringify(partial.slice(0, 40))}… (${partial.length} chars)`);
   check(partial.length < POLISHED.length, 'expected a partial prompt mid-stream, got the whole thing at once');
+  const status = await page.$eval('#polish-status', (el) => (el.classList.contains('hidden') ? '' : el.textContent));
+  check(/Polishing with AI — writing… \d+ words so far/.test(status), 'status line should show progress mid-stream: ' + status);
   await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
+  check(await page.$eval('#polish-status', (el) => el.classList.contains('hidden')), 'status line should disappear when the polish ends');
   checkPinned(page, await promptText(page), 'Test 11');
   check(await page.$eval('#tab-polished', (el) => el.classList.contains('on') && !el.disabled), 'polished tab not active after the stream');
   const polishCall = mockCalls.find((c) => /outstanding prompts/.test(c.sys));
@@ -479,6 +496,14 @@ await test('Test 11: streaming polish', async () => {
   await page.click('#polish-btn');
   await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled, null, { timeout: 8000 });
   checkPinned(page, await promptText(page), 'Test 11 second polish');
+  // A polish that never answers: the status line counts up, and Skip keeps the structured prompt.
+  await page.evaluate(() => { window.PromptForge.settings.baseUrl = 'http://localhost:8787/slow/v1'; });
+  await page.click('#polish-btn');
+  await page.waitForFunction(() => /waiting for the first words… \d+s/.test(document.querySelector('#polish-status').textContent) && !document.querySelector('#polish-status').classList.contains('hidden'), null, { timeout: 5000 });
+  await page.click('#polish-cancel');
+  check(await page.$eval('#polish-status', (el) => el.classList.contains('hidden')), 'Skip should hide the status line');
+  check(!(await page.$eval('#polish-btn', (el) => el.disabled)) && (await page.$eval('#tab-structured', (el) => el.classList.contains('on'))), 'Skip should re-enable Polish and show the structured prompt');
+  check((await promptText(page)).startsWith('# Build request:'), 'structured prompt should be showing after Skip');
   await page.context().close();
 });
 
@@ -495,6 +520,7 @@ await test('Test 12: Anthropic path (mock)', async () => {
   await page.waitForFunction(() => !document.querySelector('#polish-btn').disabled && document.querySelector('#tab-polished').classList.contains('on'), null, { timeout: 8000 });
   checkPinned(page, await promptText(page), 'Test 12');
   const q = mockCalls.find((c) => /software consultant/.test(c.sys))?.body || {};
+  check(!/MODE: change to an existing app/.test(mockCalls.find((c) => /software consultant/.test(c.sys))?.user || ''), 'a new build must not carry the existing-app MODE line');
   log('  question request: ' + JSON.stringify({ output_config: q.output_config, max_tokens: q.max_tokens, stream: q.stream }));
   check(q.output_config?.format?.type === 'json_schema' && q.output_config.format.schema?.properties?.questions, 'question request lacks output_config.format json_schema');
   check(q.output_config?.effort === 'low', 'question request should run at low effort');
@@ -736,6 +762,71 @@ await test('Test 17: offline shell', async () => {
     log('  offline reload rendered the describe screen');
     await ctx.close();
   } finally { child.kill(); }
+});
+
+// ---------- Test 19: a change to an existing app gets its own questions and a change-request prompt ----------
+await test('Test 19: existing-app mode', async () => {
+  const page = await newPage(null);
+  await page.fill('#idea', "Add CSV export to my existing Android app for the RC club. It's Kotlin with Room; code is on GitHub at https://github.com/mbw/flightlog.");
+  await page.click('#start-btn');
+  await page.waitForSelector('#screen-refine:not(.hidden)');
+  const detected = await briefItems(page);
+  log('  detected:\n    ' + detected.join('\n    '));
+  check(detected.includes('Starting point = Adding to an existing project'), 'existing app not detected from the description');
+  check(detected.some((d) => /^Your code = .*github\.com\/mbw\/flightlog/.test(d)), 'GitHub link not picked up as the code location');
+  check(detected.includes('Type = Mobile app'), 'type not detected');
+  const asked = [];
+  const answer = async (re, fn) => { check(await walkUntil(page, re, asked), `question not asked: ${re}`); await fn(); await page.click('#q-next'); };
+  await answer(/Why this change/, () => page.fill('#q-free', 'Members keep asking for it'));
+  await answer(/What should be different/, () => page.fill('#q-free', 'Export all flights to CSV\nAdd a share button on the export'));
+  await answer(/What is it built with/, async () => check((await page.$eval('#q-free', (el) => el.value)) === 'Kotlin.', 'built-with box should be pre-filled from the description'));
+  await answer(/comfortable are you with code/, () => page.click('#q-chips .chip >> nth=2'));
+  await answer(/What must not change/, () => page.fill('#q-free', 'Existing flights must still load\nKeep the current look'));
+  await answer(/How do you run and test/, () => page.fill('#q-free', 'Gradle in Android Studio; no tests'));
+  await answer(/What do you want the AI to give you/, async () => {
+    const chips = await page.$$eval('#q-chips .chip', (els) => els.map((e) => e.textContent));
+    check(chips[1] === 'Only the changed parts (a patch / diff)', 'deliverable chips should be the change-request set: ' + chips.join(' | '));
+    await page.click('#q-chips .chip >> nth=1');
+  });
+  await walkUntil(page, /never matches/, asked);
+  await page.waitForSelector('#screen-result:not(.hidden)');
+  log('  asked: ' + asked.join(' | '));
+  for (const bad of [/Where does it need to run/, /Who's going to use/, /remember anything between uses/, /How should it look/, /starting from scratch/]) {
+    check(!asked.some((q) => bad.test(q)), 'from-scratch question asked in existing-app mode: ' + bad);
+  }
+  const prompt = await promptText(page);
+  fs.writeFileSync(path.join(SHOTS, 'prompt-change-request.md'), prompt);
+  check(prompt.startsWith('# Change request: '), 'title should be a change request');
+  check(/## What I want changed\n[\s\S]*Why: Members keep asking for it/.test(prompt), '"What I want changed" section missing the why');
+  check(/## The existing app\n- \*\*Kind:\*\* Mobile app\n- \*\*Built with:\*\* Kotlin\.\n- \*\*The code:\*\* The code is on GitHub \(https:\/\/github\.com\/mbw\/flightlog\)\. Read the relevant parts/.test(prompt), '"The existing app" section wrong: ' + (/## The existing app\n[\s\S]*?\n\n/.exec(prompt) || [''])[0]);
+  check(/## What should change\n1\. Export all flights to CSV\n2\. Add a share button on the export\n/.test(prompt), 'changes not numbered');
+  check(/## What must stay the same\n- Existing flights must still load\n- Keep the current look\n/.test(prompt), 'preserve list missing');
+  check(/## How I run and test it\nGradle in Android Studio; no tests\n/.test(prompt), 'run-and-test section missing');
+  check(/## What I want from you\nGive me only the changed parts as a diff/.test(prompt), 'diff deliverable not phrased');
+  check(/- Read the existing code before proposing anything/.test(prompt) && /- Make the requested changes first/.test(prompt), 'change-request rules missing');
+  check(!/## Data and accounts|Must-have features \(version 1\)|## Type and platform/.test(prompt), 'new-build sections leaked into the change request');
+  const cov = await page.$$eval('#coverage li', (els) => els.map((e) => e.textContent.trim().replace(/\s+/g, ' ')));
+  check(cov.some((c) => /^✓What should change/.test(c)) && cov.some((c) => /^✓Built with/.test(c)) && !cov.some((c) => /Data & accounts|Platform/.test(c)), 'coverage list should use the change-request labels: ' + cov.join(' / '));
+  await page.context().close();
+});
+
+// ---------- Test 20: the switch on the first screen, and the AI round told about the mode ----------
+await test('Test 20: existing-app switch + AI mode line', async () => {
+  mockCalls = [];
+  const page = await newPage({ provider: 'custom', baseUrl: 'http://localhost:8787/v1', apiKey: 'test', model: 'mock', autoPolish: false, depth: 'quick' });
+  await page.click('#mode [data-mode="existing"]');
+  await page.fill('#idea', 'Make the list faster.'); // no cue words at all; the switch alone must set the mode
+  await page.click('#start-btn');
+  await page.waitForSelector('#screen-refine:not(.hidden)');
+  check((await briefItems(page)).includes('Starting point = Adding to an existing project'), 'the switch did not set the starting point');
+  const asked = [];
+  check(await walkUntil(page, /battery cycles be tracked/, asked), 'AI question not reached in existing-app mode');
+  log('  asked before the AI round: ' + asked.join(' | '));
+  check(asked.some((q) => /How will the AI get at your code/.test(q)) && asked.some((q) => /What should be different/.test(q)), 'existing-app questions not asked after the switch');
+  check(!asked.some((q) => /Where does it need to run|Who's going to use|remember anything between uses/.test(q)), 'from-scratch questions asked after the switch');
+  const call = mockCalls.find((c) => /software consultant/.test(c.sys));
+  check(!!call && /^MODE: change to an existing app/.test(call.user), 'AI question round should be told this is a change to an existing app');
+  await page.context().close();
 });
 
 await browser.close();
