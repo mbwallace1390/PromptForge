@@ -829,6 +829,61 @@ await test('Test 20: existing-app switch + AI mode line', async () => {
   await page.context().close();
 });
 
+// ---------- Test 21: "review it and suggest improvements" is a review request, not an invented change list ----------
+await test('Test 21: review mode', async () => {
+  const page = await newPage(null);
+  await page.fill('#idea', 'Review my existing mobile app (Expo with Firebase), open in Claude Code, and suggest improvements I may not have thought of.');
+  await page.click('#start-btn');
+  await page.waitForSelector('#screen-refine:not(.hidden)');
+  const detected = await briefItems(page);
+  log('  detected:\n    ' + detected.join('\n    '));
+  check(detected.includes("Kind of change = Review it and suggest improvements — I'm not sure what's needed"), 'review intent not detected');
+  check(detected.some((d) => /^Your code = It's open in the AI's editor/.test(d)), '"open in Claude Code" not detected as editor access');
+  check(!detected.some((d) => /^Connections = Claude/.test(d)), '"Claude Code" must not count as a Claude service connection');
+  const asked = [];
+  const answer = async (re, fn) => { check(await walkUntil(page, re, asked), `question not asked: ${re}`); await fn(); await page.click('#q-next'); };
+  await answer(/What matters most right now/, async () => { await page.click('#q-chips .chip >> nth=0'); await page.click('#q-chips .chip >> nth=1'); });
+  await answer(/Why this change/, () => page.fill('#q-free', 'It has grown for two years without anyone stepping back'));
+  await answer(/What is it built with/, () => page.fill('#q-free', 'Expo (React Native) with Firebase'));
+  await answer(/comfortable are you with code/, () => page.click('#q-chips .chip >> nth=1'));
+  await answer(/What must not change/, () => page.fill('#q-free', 'Keep the sync working'));
+  await answer(/How do you run and test/, () => page.fill('#q-free', 'npx expo start; I test on my phone'));
+  await answer(/What do you want the AI to give you/, async () => {
+    const chips = await page.$$eval('#q-chips .chip', (els) => els.map((e) => e.textContent));
+    check(chips[0] === 'A ranked list of improvements — no code changes yet', 'deliverable chips should be the review set: ' + chips.join(' | '));
+    await page.click('#q-chips .chip >> nth=0');
+  });
+  await walkUntil(page, /never matches/, asked);
+  await page.waitForSelector('#screen-result:not(.hidden)');
+  log('  asked: ' + asked.join(' | '));
+  check(!asked.some((q) => /What should be different when this is done/.test(q)), 'a review must not demand a change list');
+  const prompt = await promptText(page);
+  fs.writeFileSync(path.join(SHOTS, 'prompt-review-request.md'), prompt);
+  check(prompt.startsWith('# Review request: '), 'title should be a review request');
+  check(/## What I want\n[\s\S]*Don't change any code until I've picked from your list\./.test(prompt), '"What I want" should say review first, no changes');
+  check(/## What matters most\nSpeed and performance, Fewer bugs and crashes\n/.test(prompt), 'focus chips missing from the prompt');
+  check(!/## What should change/.test(prompt) && !/I haven't listed the changes/.test(prompt), 'a review must not carry an (empty) change list');
+  check(/## The existing app\n[\s\S]*\*\*The code:\*\* You have the project open in your editor/.test(prompt), 'editor access line missing');
+  check(/## What I want from you\nA ranked list of improvements, no code changes yet\./.test(prompt), 'review deliverable missing');
+  check(/- Don't change any code until I've picked from your list\. Suggest, rank, explain — then wait for me\./.test(prompt), 'review rule missing');
+  check(!/Make the requested changes first/.test(prompt), 'the make-changes-first rule does not belong in a review');
+  check(!/I haven't decided on:[^\n]*(what should change|what you want back)/.test(prompt), 'unspecified list should not name the change list or the deliverable in a review');
+  await page.context().close();
+});
+
+// ---------- Test 22: the AI round is told it is a review ----------
+await test('Test 22: review MODE line', async () => {
+  mockCalls = [];
+  const page = await newPage({ provider: 'custom', baseUrl: 'http://localhost:8787/v1', apiKey: 'test', model: 'mock', autoPolish: false, depth: 'quick' });
+  await page.fill('#idea', 'Review my existing mobile app and suggest improvements I may not have thought of.');
+  await page.click('#start-btn');
+  const asked = [];
+  check(await walkUntil(page, /battery cycles be tracked/, asked), 'AI question not reached in review mode');
+  const call = mockCalls.find((c) => /software consultant/.test(c.sys));
+  check(!!call && /^MODE: review of an existing app/.test(call.user), 'AI question round should be told this is a review: ' + (call ? call.user.slice(0, 60) : 'no call'));
+  await page.context().close();
+});
+
 await browser.close();
 for (const res of hanging) res.destroy();
 server.close();

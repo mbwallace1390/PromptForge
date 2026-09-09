@@ -22,6 +22,8 @@ Using a model on your own computer (Ollama, LM Studio) from the double-clicked f
 
 Switch "New idea" to "Change an existing app" on the first screen, or just say so in the description ("add CSV export to my existing Android app", "fix the crash in my bot"). The interview changes: instead of type, platform, audience and data storage it asks what the app is built with, how the AI will get at the code (GitHub link, pasted files, or open in Claude Code / Cursor), what should be different when it's done, what must not change, and how you run and test it today. The prompt comes out as a **Change request** with those sections and three extra rules: read the existing code first and follow its conventions, keep the change as small as the request allows, and say what changed in every file touched. A rewrite or port is treated as a new build with a reference codebase, so it keeps the from-scratch questions.
 
+Not sure what should change? Say "review it and suggest improvements" (or pick that on the "kind of change" question) and it becomes a **Review request**: what matters most to you, anything you already know is wrong, what is off-limits, and how you want the findings — a ranked list with no code changes until you pick, fixing the top few straight away, or a written report. The prompt tells the AI to propose and wait, and never writes the improvement list for it.
+
 ## Optional AI mode
 
 Open **Settings** and pick a provider:

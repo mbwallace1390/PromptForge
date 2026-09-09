@@ -701,7 +701,7 @@ const STACK_PATTERNS = [
   ['Firebase', /\bfirebase\b/i], ['Supabase', /\bsupabase\b/i], ['Tailwind', /\btailwind\b/i], ['Arduino', /\barduino\b/i], ['WebView', /\bwebview\b/i],
 ];
 
-const INTEGRATION_RE = /\b(google (maps|calendar|drive|sheets|photos)|calendar|spotify|youtube|twitter|instagram|facebook|discord|telegram|slack|stripe|paypal|payments?|email|sms|twilio|push notifications?|notifications?|weather|gps|location|camera|bluetooth|ble\b|usb|serial port|nfc|qr codes?|barcodes?|openai|chatgpt|claude|llm|webhooks?|zapier|ifttt|home assistant|mqtt|smart home|printer|scanner|github|strava|fitbit|garmin)\b/gi;
+const INTEGRATION_RE = /\b(google (maps|calendar|drive|sheets|photos)|calendar|spotify|youtube|twitter|instagram|facebook|discord|telegram|slack|stripe|paypal|payments?|email|sms|twilio|push notifications?|notifications?|weather|gps|location|camera|bluetooth|ble\b|usb|serial port|nfc|qr codes?|barcodes?|openai|chatgpt|claude(?! code)|llm|webhooks?|zapier|ifttt|home assistant|mqtt|smart home|printer|scanner|github|strava|fitbit|garmin)\b/gi;
 const DESIGN_RE = /\b(dark mode|dark theme|light theme|minimal(ist)?|clean (look|design|ui|interface)|modern (look|design|ui|interface)|material design|colou?rful|playful|professional (look|design)|look and feel|looks? like|similar to|brand colou?rs?|retro|neon|glassmorphism|cartoon(y)?|pixel art)\b/gi;
 // Matches are shown to the user and can end up in the prompt, so each alternative has to read as a
 // requirement on its own ("private Discord bot" is not a privacy constraint; "keep data private" is).
@@ -731,6 +731,18 @@ function isExisting(s = state) {
   if (/rewrit|port|migrat|convert/i.test(c)) return false;
   return /adding to|existing|already|current app/i.test(c);
 }
+/** Within existing-app mode: 'none' (a specific change), 'review' (suggest improvements first), or 'both'. */
+function reviewKind(s = state) {
+  if (!isExisting(s)) return 'none';
+  const a = s.answers.changeKind;
+  if (!a || a.source === 'skipped' || a.source === 'delegate') return 'none';
+  const c = (a.choices || []).join(' ');
+  if (/^both/i.test(c)) return 'both';
+  if (/review|suggest/i.test(c)) return 'review';
+  return 'none';
+}
+const isReview = (s = state) => reviewKind(s) !== 'none';
+const isReviewOnly = (s = state) => reviewKind(s) === 'review';
 /** Question wording can depend on the mode: a DIMS field may be a string or a function of state. */
 const dimText = (v, s = state) => (typeof v === 'function' ? v(s) : v);
 const dimLabel = (d) => dimText(d.label);
@@ -773,6 +785,26 @@ const DIMS = [
       if (/\b(claude code|cursor|copilot|windsurf|in (the|my) (project|app) folder|open in (my|the) editor)\b/i.test(text)) return { choices: ["It's open in the AI's editor (Claude Code, Cursor, Copilot)"], note: 'from your description' };
       return null;
     },
+  },
+  {
+    id: 'changeKind', label: 'Kind of change', priority: 'essential', type: 'single',
+    when: (s) => isExisting(s),
+    question: 'Do you know what you want changed, or do you want it reviewed first?',
+    why: 'A specific change and an open review are different jobs: one edits, the other suggests and waits.',
+    options: ['I know what I want changed (a feature, a fix, an upgrade)', "Review it and suggest improvements — I'm not sure what's needed", 'Both: make these changes, and tell me what else you would improve'],
+    detect(text) {
+      if (/\b(review|audit|health ?check|look over|go through|suggest(?:ions| improvements)?|improvements? (?:that )?(?:i|we) (?:may|might) not have thought of|what (?:could|can|should) be (?:better|improved)|what would you (?:change|improve))\b/i.test(text)) return { choices: ["Review it and suggest improvements — I'm not sure what's needed"], note: 'from your description' };
+      return null;
+    },
+  },
+  {
+    id: 'reviewFocus', label: 'What matters most', priority: 'essential', type: 'multi', exclusive: 'Everything — surprise me',
+    when: (s) => isReview(s),
+    question: 'What matters most right now?',
+    why: 'A review of everything is shallow; a review of what you care about is useful.',
+    options: ['Speed and performance', 'Fewer bugs and crashes', 'Easier to maintain and extend', 'Look and feel, ease of use', 'Security and privacy', 'Up-to-date dependencies', 'Tests and reliability', 'Accessibility', 'Everything — surprise me'],
+    placeholder: 'e.g. The flight list is slow and I dread touching the sync code.',
+    delegate: 'Look at everything and rank what you find by impact on the people using it.',
   },
   {
     id: 'preserve', label: 'What must stay the same', priority: 'important', type: 'text', big: true,
@@ -873,9 +905,11 @@ const DIMS = [
     delegate: "Assume a small, friendly audience unless the description suggests otherwise, and tell me what you assumed.",
   },
   {
-    id: 'coreFeatures', label: (s) => (isExisting(s) ? 'What should change' : 'Must-have features'), priority: 'essential', type: 'text', big: true,
-    question: (s) => (isExisting(s) ? 'What should be different when this is done?' : 'What must the first version be able to do?'),
-    why: (s) => (isExisting(s) ? "One change per line. This is the AI's checklist — anything not here stays as it is." : "List the essentials, one per line. This becomes the AI's checklist — anything not here is optional."),
+    id: 'coreFeatures', label: (s) => (isReviewOnly(s) ? 'Known problems' : isExisting(s) ? 'What should change' : 'Must-have features'),
+    priority: (s) => (isReviewOnly(s) ? 'optional' : 'essential'), // a review is asked for because the person does not know what should change
+    type: 'text', big: true,
+    question: (s) => (isReviewOnly(s) ? 'Anything you already know needs fixing or changing?' : isExisting(s) ? 'What should be different when this is done?' : 'What must the first version be able to do?'),
+    why: (s) => (isReviewOnly(s) ? 'Optional. Known problems go to the top of the list.' : isExisting(s) ? "One change per line. This is the AI's checklist — anything not here stays as it is." : "List the essentials, one per line. This becomes the AI's checklist — anything not here is optional."),
     placeholder: (s) => (isExisting(s) ? 'e.g.\nAdd a dark-mode toggle in Settings\nExport all flights to CSV\nFix the crash when a battery has no name' : 'e.g.\nLog a flight with date, model and duration\nShow total flights per model\nExport everything to CSV'),
     hint: (s) => (isExisting(s) ? 'Say what the user will see or be able to do afterwards, not how to code it.' : 'Include things you already mentioned if you want them guaranteed. Details help: what does the user see, click, or get?'),
   },
@@ -912,9 +946,11 @@ const DIMS = [
     id: 'deliverable', label: 'What you want back', priority: 'important', type: 'single',
     question: 'What do you want the AI to give you?',
     why: 'Sets expectations for the first reply.',
-    options: () => (isExisting()
-      ? ['Full updated files', 'Only the changed parts (a patch / diff)', 'Step-by-step edits I make myself', 'A plan first, then the changes']
-      : ['Complete, working code', 'A build plan first, then the code', 'A single file I can run right away', 'Just the plan / architecture', 'Build it step by step and explain as you go']),
+    options: () => (isReviewOnly()
+      ? ['A ranked list of improvements — no code changes yet', 'Fix the top few straight away, then list the rest', 'A written report I can read later']
+      : isExisting()
+        ? ['Full updated files', 'Only the changed parts (a patch / diff)', 'Step-by-step edits I make myself', 'A plan first, then the changes']
+        : ['Complete, working code', 'A build plan first, then the code', 'A single file I can run right away', 'Just the plan / architecture', 'Build it step by step and explain as you go']),
     detect(text) {
       if (isExisting()) return null; // the from-scratch phrases below do not apply to a change
       if (/\b(single file|one file|one html file)\b/i.test(text)) return { choices: ['A single file I can run right away'], note: 'from your description' };
@@ -1261,6 +1297,8 @@ function dataBody() {
   if (a.text && a.text.trim()) s += (s ? ' ' : '') + a.text.trim();
   return s;
 }
+/** What a review hands back unless the person chose otherwise: proposals, ranked, and no edits until they pick. */
+const REVIEW_DELIVERABLE = "A ranked list of improvements, no code changes yet. For each one: what you would change, why it matters, roughly how much work it is, and what could break. I'll pick from the list, then we change things.";
 /** A beginner who never said what they want back gets the consultant's default: the simplest thing that runs. */
 const BEGINNER_DELIVERABLE = "I'm new to this, so give me the simplest thing that runs: a single file if that's realistic, otherwise a very small project, with exact steps to set it up and run it.";
 const isBeginner = () => !delegated('skillLevel') && has(val('skillLevel'), BEGINNER_RE);
@@ -1268,13 +1306,21 @@ const beginnerDeliverable = () => isBeginner() && dimStatus('deliverable') === '
 function deliverableBody() {
   if (delegated('deliverable')) return delegateLine('deliverable');
   const t = val('deliverable');
-  if (!t) return beginnerDeliverable() ? (isExisting() ? "I'm new to this, so give me the complete updated version of every file you change, with exact steps to put them in place and run the app." : BEGINNER_DELIVERABLE) : '';
-  if (viaAi(state.answers.deliverable)) return aiQuoted(state.answers.deliverable);
+  const alsoReview = reviewKind() === 'both' ? " After that, list any other improvements you'd make, ranked by impact — as suggestions, not changes." : '';
+  if (!t) {
+    if (isReviewOnly()) return REVIEW_DELIVERABLE; // the sensible default for a review: propose, don't touch
+    return beginnerDeliverable() ? (isExisting() ? "I'm new to this, so give me the complete updated version of every file you change, with exact steps to put them in place and run the app." : BEGINNER_DELIVERABLE) + alsoReview : '';
+  }
+  if (viaAi(state.answers.deliverable)) return aiQuoted(state.answers.deliverable) + alsoReview;
+  // Review chips
+  if (has(t, /ranked list of improvements/i)) return REVIEW_DELIVERABLE;
+  if (has(t, /fix the top few/i)) return "Fix the two or three improvements with the most impact straight away — tell me what they are before you touch anything — then list the rest, ranked, for me to choose from.";
+  if (has(t, /written report/i)) return 'A written report I can read later: findings grouped by area, each with why it matters and what you would do about it. No code changes.';
   // Change-request chips
-  if (has(t, /full updated files/i)) return 'Give me the complete updated version of every file you change, each with its path, so I can replace files one for one.';
-  if (has(t, /changed parts|patch|diff/i)) return 'Give me only the changed parts as a diff, with the file path above each hunk, so I can apply them myself.';
-  if (has(t, /step-by-step edits/i)) return 'Walk me through the edits one file at a time: what to open, what to change, and how to check it — and wait for my go-ahead between files.';
-  if (has(t, /then the changes/i)) return 'First, a short plan of the change: which files, what changes in each, in what order. Once I confirm it, the changes themselves.';
+  if (has(t, /full updated files/i)) return 'Give me the complete updated version of every file you change, each with its path, so I can replace files one for one.' + alsoReview;
+  if (has(t, /changed parts|patch|diff/i)) return 'Give me only the changed parts as a diff, with the file path above each hunk, so I can apply them myself.' + alsoReview;
+  if (has(t, /step-by-step edits/i)) return 'Walk me through the edits one file at a time: what to open, what to change, and how to check it — and wait for my go-ahead between files.' + alsoReview;
+  if (has(t, /then the changes/i)) return 'First, a short plan of the change: which files, what changes in each, in what order. Once I confirm it, the changes themselves.' + alsoReview;
   // New-build chips
   if (has(t, /single file/i)) return 'A single self-contained file I can open or run immediately, with no build step if at all possible.';
   if (has(t, /plan first|then the code/i)) return 'First, a short build plan (architecture, files, order of work). Once I confirm it, the complete code.';
@@ -1350,6 +1396,7 @@ function unspecifiedDims() {
   return DIMS.filter((d) => {
     if (d.when && !d.when(state)) return false;
     if (['name', 'niceToHave', 'outOfScope', 'successCriteria', 'purpose', 'preserve'].includes(d.id)) return false; // preserve has a stated default
+    if (isReviewOnly() && (d.id === 'coreFeatures' || d.id === 'deliverable')) return false; // a review has no change list, and a default deliverable
     if (d.id === 'deliverable' && beginnerDeliverable()) return false; // covered by the beginner default
     const s = dimStatus(d.id);
     return s === 'missing' || s === 'skipped';
@@ -1392,11 +1439,14 @@ function runAndTestBody() {
 }
 /** A change to an app that exists: what it is, how to reach it, what changes, what must not. */
 function buildChangeRequest() {
-  let out = `# Change request: ${deriveTitle()}\n\n`;
+  const kind = reviewKind();
+  let out = `# ${kind === 'review' ? 'Review request' : 'Change request'}: ${deriveTitle()}\n\n`;
   let what = state.description.trim();
   const purpose = val('purpose');
   if (purpose) what += `\n\nWhy: ${purpose}`;
-  out += section('What I want changed', what);
+  if (kind === 'review') what += "\n\nI want you to review the app as it is and tell me what you would improve, ranked. Don't change any code until I've picked from your list.";
+  if (kind === 'both') what += "\n\nMake the changes listed below. Beyond those, tell me what else you would improve — as suggestions I can choose from, not as changes.";
+  out += section(kind === 'review' ? 'What I want' : 'What I want changed', what);
 
   const app = [];
   if (delegated('projectType')) app.push(`- **Kind:** ${delegateLine('projectType')}`);
@@ -1407,10 +1457,22 @@ function buildChangeRequest() {
   if (spText) app.push(`- **About it:** ${spText}`);
   out += section('The existing app', app.join('\n'));
 
+  if (kind !== 'none') {
+    const f = state.answers.reviewFocus;
+    const focus = delegated('reviewFocus') ? delegateLine('reviewFocus')
+      : hasContent(f) ? [(f.choices || []).filter((c) => !/surprise me/i.test(c)).join(', '), (f.text || '').trim()].filter(Boolean).join('. ') || 'Everything — rank what you find by impact.'
+      : '';
+    out += section('What matters most', focus);
+  }
+
   const changes = toList(val('coreFeatures'));
-  out += section('What should change', changes.length
-    ? changes.map((c, i) => `${i + 1}. ${c}`).join('\n') + '\n\nThis list is the whole request. Nothing else changes unless I say so.'
-    : "I haven't listed the changes separately — work from the description above. Before you change anything, write out the changes you believe I'm asking for as a numbered list and confirm them with me.");
+  if (kind === 'review') {
+    if (changes.length) out += section('Known problems or wanted changes', changes.map((c) => `- ${c}`).join('\n') + '\n\nPut these at the top of your list; they are not the whole list.');
+  } else {
+    out += section('What should change', changes.length
+      ? changes.map((c, i) => `${i + 1}. ${c}`).join('\n') + (kind === 'both' ? '\n\nThese are the changes to make. Anything else you would improve goes in your list of suggestions.' : '\n\nThis list is the whole request. Nothing else changes unless I say so.')
+      : "I haven't listed the changes separately — work from the description above. Before you change anything, write out the changes you believe I'm asking for as a numbered list and confirm them with me.");
+  }
   out += section('What must stay the same', preserveBody() || 'Everything I have not mentioned must keep working exactly as it does now, including how saved data loads.');
   out += section('How I run and test it', runAndTestBody());
 
@@ -1485,11 +1547,13 @@ function rulesBody() {
   const skill = skillBody(); if (skill) rules.push(skill);
   if (isExisting()) {
     rules.push('Read the existing code before proposing anything, and follow its conventions — naming, structure, libraries — rather than introducing new ones.');
+    if (isReviewOnly()) rules.push("Don't change any code until I've picked from your list. Suggest, rank, explain — then wait for me.");
+    else if (reviewKind() === 'both') rules.push('Make the listed changes. Anything else you would improve is a suggestion for me to approve, not a change to make.');
     rules.push("Keep the change as small as the request allows. Touch only what it needs; don't refactor or \"clean up\" unrelated code.");
     rules.push('For every file you change, say what changed and why.');
   }
   rules.push("Before you write any code, restate your understanding of this project in a few sentences and list the assumptions you're making. If something is unclear and would significantly change the outcome, ask me — otherwise make a reasonable choice and tell me what you chose.");
-  rules.push(isExisting() ? 'Make the requested changes first and get them working end to end before touching anything optional.' : 'Build the must-have features first and get them working end to end before touching anything optional.');
+  if (!isReviewOnly()) rules.push(isExisting() ? 'Make the requested changes first and get them working end to end before touching anything optional.' : 'Build the must-have features first and get them working end to end before touching anything optional.');
   rules.push('Keep the code organized and commented so it can be maintained later.');
   rules.push("When you're done, tell me exactly how to run it and how to test that each must-have feature works.");
   rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
@@ -1620,7 +1684,9 @@ Rules:
 - If you add any detail the person did not give — a feature, a data source, a hosting choice, a style, a constraint — append " (suggested)" to it so they can delete it. Never present your own suggestion as their requirement.
 - Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
 - Use Markdown headings ("## Section") for sections, never bold lines, and never add sub-headings such as "Overview" inside a section. Structure: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
-- If the draft is a "Change request" for an app that already exists, use this structure instead: title; what I want changed and why; the existing app (what it is, what it is built with, how you reach the code); what should change, numbered; what must stay the same; how I run and test it; then connections, constraints, out of scope, what to deliver, success criteria, open questions.
+- If the draft is a "Change request" for an app that already exists, use this structure instead: title; what I want changed and why; the existing app (what it is, what it is built with, how you reach the code); what matters most, if present; what should change, numbered; what must stay the same; how I run and test it; then connections, constraints, out of scope, what to deliver, success criteria, open questions.
+- If the draft is a "Review request", keep it a request for suggestions: title; what I want (a review, no changes yet); the existing app; what matters most; known problems, if any; what must stay the same; how I run and test it; what to deliver; open questions. Never write the list of improvements yourself — the AI that receives this prompt will, after reading the code.
+- The person is asking; the AI that receives this prompt does the work. Never write plans or promises in the person's voice ("I'll examine the codebase", "Please let me know if you agree").
 - Do not write a "How to work with me" section or a "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Both sections are appended afterwards exactly as the person wrote them.
 - Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
 - Output only the prompt, in Markdown.`;
@@ -1843,7 +1909,8 @@ function qaSummary() {
 }
 async function aiFetchQuestions() {
   const perRound = state.depth === 'quick' ? 3 : 5; // the built-in essentials already took a few slots in quick mode
-  const mode = isExisting() ? 'MODE: change to an existing app — ask about the existing code, what must keep working, and how it is run and tested; never about building it from scratch.\n\n' : '';
+  const mode = isReviewOnly() ? 'MODE: review of an existing app — the person wants suggestions, not a build. Ask what matters most to them, what they already know is wrong, what is off-limits, and how they want the findings. Do not propose improvements yourself.\n\n'
+    : isExisting() ? 'MODE: change to an existing app — ask about the existing code, what must keep working, and how it is run and tested; never about building it from scratch.\n\n' : '';
   const user = `${mode}PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
   // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
   // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
@@ -2334,6 +2401,7 @@ const EXAMPLES = [
   'A Discord bot that posts the weather for our field every morning and lets people say if they are flying.',
   'A little desktop program that watches a folder and renames my 3D printer files by date and model.',
   "Add CSV export to my existing Android app. It's Kotlin with Room, and the code is on GitHub.",
+  'Review my existing Expo app, open in Claude Code, and suggest improvements I may not have thought of.',
 ];
 function init() {
   refreshAiBadge();
