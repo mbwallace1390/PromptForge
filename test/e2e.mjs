@@ -826,14 +826,18 @@ await test('Test 20: existing-app switch + AI mode line', async () => {
   await page.fill('#idea', 'Make the list faster.'); // no cue words at all; the switch alone must set the mode
   await page.click('#start-btn');
   await page.waitForSelector('#screen-refine:not(.hidden)');
-  check((await briefItems(page)).includes('Starting point = Adding to an existing project'), 'the switch did not set the starting point');
+  const brief = await briefItems(page);
+  check(brief.includes('Starting point = Adding to an existing project'), 'the switch did not set the starting point');
+  check(brief.includes("Your code = It's open in the AI's editor (Claude Code, Cursor, Copilot)"), 'code access should default to the editor');
+  check((await page.$$eval('#brief-list .pill', (els) => els.map((e) => e.textContent))).includes('assumed'), 'the default should be labelled assumed, not detected');
   const asked = [];
   check(await walkUntil(page, /battery cycles be tracked/, asked), 'AI question not reached in existing-app mode');
   log('  asked before the AI round: ' + asked.join(' | '));
-  check(asked.some((q) => /How will the AI get at your code/.test(q)) && asked.some((q) => /What should be different/.test(q)), 'existing-app questions not asked after the switch');
+  check(asked.some((q) => /What should be different/.test(q)), 'existing-app questions not asked after the switch');
+  check(!asked.some((q) => /How will the AI get at your code|What kind of app is it|What is it built with/.test(q)), 'with the project open in the agent, the code-access, kind and built-with questions are noise');
   check(!asked.some((q) => /Where does it need to run|Who's going to use|remember anything between uses/.test(q)), 'from-scratch questions asked after the switch');
   const call = mockCalls.find((c) => /software consultant/.test(c.sys));
-  check(!!call && /^MODE: change to an existing app/.test(call.user), 'AI question round should be told this is a change to an existing app');
+  check(!!call && /^MODE: change to an existing app/.test(call.user) && /will have the project open/.test(call.user), 'AI question round should be told this is a change to an existing app the agent can see');
   await page.context().close();
 });
 
@@ -852,7 +856,6 @@ await test('Test 21: review mode', async () => {
   const answer = async (re, fn) => { check(await walkUntil(page, re, asked), `question not asked: ${re}`); await fn(); await page.click('#q-next'); };
   await answer(/What matters most right now/, async () => { await page.click('#q-chips .chip >> nth=0'); await page.click('#q-chips .chip >> nth=1'); });
   await answer(/Why this change/, () => page.fill('#q-free', 'It has grown for two years without anyone stepping back'));
-  await answer(/What is it built with/, () => page.fill('#q-free', 'Expo (React Native) with Firebase'));
   await answer(/comfortable are you with code/, () => page.click('#q-chips .chip >> nth=1'));
   await answer(/What must not change/, () => page.fill('#q-free', 'Keep the sync working'));
   await answer(/How do you run and test/, () => page.fill('#q-free', 'npx expo start; I test on my phone'));
@@ -865,6 +868,7 @@ await test('Test 21: review mode', async () => {
   await page.waitForSelector('#screen-result:not(.hidden)');
   log('  asked: ' + asked.join(' | '));
   check(!asked.some((q) => /What should be different when this is done/.test(q)), 'a review must not demand a change list');
+  check(!asked.some((q) => /What kind of app is it|What is it built with|How will the AI get at your code/.test(q)), 'with the app open in Claude Code, kind, built-with and code access must not be asked');
   const prompt = await promptText(page);
   fs.writeFileSync(path.join(SHOTS, 'prompt-review-request.md'), prompt);
   check(prompt.startsWith('# Review request: '), 'title should be a review request');

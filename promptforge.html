@@ -743,6 +743,9 @@ function reviewKind(s = state) {
 }
 const isReview = (s = state) => reviewKind(s) !== 'none';
 const isReviewOnly = (s = state) => reviewKind(s) === 'review';
+const EDITOR_ACCESS = "It's open in the AI's editor (Claude Code, Cursor, Copilot)";
+/** The AI can read the code itself, so questions about what the app is and what it is built with are noise. */
+const aiSeesCode = (s = state) => isExisting(s) && /editor/i.test((((s.answers.codeAccess || {}).choices) || []).join(' '));
 /** Question wording can depend on the mode: a DIMS field may be a string or a function of state. */
 const dimText = (v, s = state) => (typeof v === 'function' ? v(s) : v);
 const dimLabel = (d) => dimText(d.label);
@@ -777,13 +780,15 @@ const DIMS = [
     when: (s) => isExisting(s),
     question: 'How will the AI get at your code?',
     why: "The best change request is useless if the AI can't see what it's changing.",
-    options: ["It's on GitHub — I'll share the link", "I'll paste the files it asks for", "It's open in the AI's editor (Claude Code, Cursor, Copilot)", "I'll describe it — no code sharing"],
+    options: [EDITOR_ACCESS, "It's on GitHub — I'll share the link", "I'll paste the files it asks for", "I'll describe it — no code sharing"],
     placeholder: 'e.g. github.com/me/flightlog, or: the app folder is open in Claude Code.',
     detect(text) {
       const url = /\b(?:https?:\/\/)?(?:www\.)?(github\.com|gitlab\.com|bitbucket\.org)\/[\w.-]+\/[\w.-]+/i.exec(text);
       if (url) return { choices: ["It's on GitHub — I'll share the link"], text: url[0].replace(/[.,;:!?)]+$/, ''), note: 'from your description' }; // not the sentence's full stop
-      if (/\b(claude code|cursor|copilot|windsurf|in (the|my) (project|app) folder|open in (my|the) editor)\b/i.test(text)) return { choices: ["It's open in the AI's editor (Claude Code, Cursor, Copilot)"], note: 'from your description' };
-      return null;
+      if (/\b(i(?:'ll| will) paste|paste (?:you |it )?the (?:files|code))\b/i.test(text)) return { choices: ["I'll paste the files it asks for"], note: 'from your description' };
+      if (/\b(claude code|cursor|copilot|windsurf|in (the|my) (project|app) folder|open in (my|the) editor)\b/i.test(text)) return { choices: [EDITOR_ACCESS], note: 'from your description' };
+      // Nearly everyone pastes this prompt into an agent that already has the project open. Assume that; the brief shows it and one click changes it.
+      return { choices: [EDITOR_ACCESS], note: 'assumed', assumed: true };
     },
   },
   {
@@ -824,6 +829,7 @@ const DIMS = [
   },
   {
     id: 'projectType', label: 'Type', priority: 'essential', type: 'single',
+    when: (s) => !aiSeesCode(s), // an agent with the project open can see what kind of app it is
     question: (s) => (isExisting(s) ? 'What kind of app is it?' : 'What form should this take?'),
     why: (s) => (isExisting(s) ? "So the AI knows which platform's rules it is working under." : 'This decides the tools, the platform, and half of the other questions.'),
     options: [...Object.keys(PLATFORM_OPTIONS), NOT_SURE_TYPE],
@@ -934,6 +940,7 @@ const DIMS = [
   },
   {
     id: 'techStack', label: (s) => (isExisting(s) ? 'Built with' : 'Technology'), priority: (s) => (isExisting(s) ? 'essential' : 'important'), type: 'multi', exclusive: 'No preference — pick the best fit',
+    when: (s) => !aiSeesCode(s), // the agent reads the stack off the code
     question: (s) => (isExisting(s) ? 'What is it built with?' : 'Any preference on programming language or tools?'),
     why: (s) => (isExisting(s) ? 'The AI must match what is already there — language, framework, storage.' : "If you don't care, say so — the AI will pick something mainstream and well documented."),
     options: () => (isExisting() ? [] : ['No preference — pick the best fit']).concat(['Python', 'JavaScript / TypeScript', 'Kotlin / Android', 'Swift / iOS', 'C# / .NET', 'Java', 'Rust', 'C / C++', 'Lua', 'Other (say which)']),
@@ -1101,7 +1108,7 @@ function runDetection() {
     if (!d.detect) continue;
     const r = d.detect(text, state.answers);
     if (r && (r.choices || r.text)) {
-      state.answers[d.id] = { choices: r.choices || [], text: r.text || '', source: 'detected', note: r.note || '' };
+      state.answers[d.id] = { choices: r.choices || [], text: r.text || '', source: 'detected', note: r.note || '', assumed: !!r.assumed };
     } else if (r && r.hits) {
       // Keyword hits are a good guess, not an answer: keep asking, with the box pre-filled.
       state.answers[d.id] = { choices: [], text: '', hits: r.hits, source: 'detected', note: r.note || '', ask: true };
@@ -1917,7 +1924,7 @@ function knownSummary() {
   for (const d of DIMS) {
     const s = dimStatus(d.id);
     if (s === 'answered') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])}`);
-    else if (s === 'detected') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])} (inferred from the description${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
+    else if (s === 'detected') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])} (${state.answers[d.id].assumed ? 'assumed by default' : 'inferred from the description'}${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
     else if (s === 'delegate') lines.push(`- ${dimLabel(d)} (${d.id}): (the person said: let the AI decide)`);
     else if (s === 'skipped') lines.push(`- ${dimLabel(d)} (${d.id}): (the person chose to skip this — do not ask again)`);
     else if (defaultedDim(d)) lines.push(`- ${dimLabel(d)} (${d.id}): ${defaultedDim(d)} (a default for this kind of request — do not ask about it)`);
@@ -1936,8 +1943,9 @@ function qaSummary() {
 }
 async function aiFetchQuestions() {
   const perRound = state.depth === 'quick' ? 3 : 5; // the built-in essentials already took a few slots in quick mode
-  const mode = isReviewOnly() ? 'MODE: review of an existing app — the person wants suggestions, not a build. Ask what matters most to them, what they already know is wrong, what is off-limits, and how they want the findings. Do not propose improvements yourself.\n\n'
-    : isExisting() ? 'MODE: change to an existing app — ask about the existing code, what must keep working, and how it is run and tested; never about building it from scratch.\n\n' : '';
+  const sees = aiSeesCode() ? ' The AI that receives the prompt will have the project open, so do not ask what the app is or what it is built with.' : '';
+  const mode = isReviewOnly() ? `MODE: review of an existing app — the person wants suggestions, not a build. Ask what matters most to them, what they already know is wrong, what is off-limits, and how they want the findings. Do not propose improvements yourself.${sees}\n\n`
+    : isExisting() ? `MODE: change to an existing app — ask about the existing code, what must keep working, and how it is run and tested; never about building it from scratch.${sees}\n\n` : '';
   const user = `${mode}PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
   // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
   // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
@@ -2004,7 +2012,7 @@ function renderBrief() {
     if (s === 'delegate') { v = 'Let the AI decide'; cls = 'faint'; }
     else if (s === 'skipped') { v = 'Skipped'; cls = 'faint'; }
     else v = answerText(a);
-    const pill = s === 'detected' ? '<span class="pill detected">detected</span>' : s === 'delegate' ? '<span class="pill delegate">AI decides</span>' : s === 'skipped' ? '<span class="pill skipped">skipped</span>' : a.via === 'ai' ? '<span class="pill ai">✦</span>' : '';
+    const pill = s === 'detected' ? `<span class="pill detected">${a.assumed ? 'assumed' : 'detected'}</span>` : s === 'delegate' ? '<span class="pill delegate">AI decides</span>' : s === 'skipped' ? '<span class="pill skipped">skipped</span>' : a.via === 'ai' ? '<span class="pill ai">✦</span>' : '';
     items.push(`<li class="brief-item"><div class="k"><span>${esc(dimLabel(d))}</span>${pill}</div><div class="v ${cls}">${esc(v)}</div></li>`);
   }
   for (const x of state.extraQA) items.push(`<li class="brief-item"><div class="k"><span>${esc(x.q)}</span><span class="pill ai">✦</span></div><div class="v">${esc(x.a)}</div></li>`);
