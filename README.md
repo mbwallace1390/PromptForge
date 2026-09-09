@@ -10,6 +10,8 @@ Everything is in one file: `promptforge.html`. No install, no server, no build s
 
 It also runs from a file: double-click `promptforge.html`. Built-in mode works fully offline either way. Settings, past briefs, and any API key are saved in the browser's localStorage only.
 
+When using the Windows launcher, a second launch reuses the server only if it belongs to this copy of PromptForge. If another app is using port 5173, the launcher reports the conflict. Close that app or, in PowerShell, run `$env:PORT=5174; npm run serve` to choose another port.
+
 Using a model on your own computer (Ollama, LM Studio) from the double-clicked file? Local servers refuse a page opened straight from a file, so double-click `PromptForge.cmd` on Windows instead (starts a tiny local server and opens the app at http://localhost:5173) or run `npm run serve`. From the hosted site, tell Ollama to allow it once: `setx OLLAMA_ORIGINS "https://mbwallace1390.github.io"` in cmd, then restart Ollama. The app shows this exact line when a local call fails.
 
 ## How it works
@@ -41,6 +43,16 @@ Open **Settings** and pick a provider:
 With a provider on, the built-in essentials (type, platform, goal, who it's for, must-have features) are still asked first with their quick-pick chips, so a weak model can't steer the basics. The model then generates follow-up questions tailored to the specific project (it is given the description, what is already known, and the list of dimensions still unknown, and returns JSON questions that map back onto those dimensions), in up to 2–3 short rounds. Its option wording is mapped onto the app's own labels where later logic depends on them ("web app" still unlocks the platform question; "not sure — you decide" counts as letting the AI decide), and answers it collected are quoted together with the question they answered. The JSON shape is enforced by the API — structured outputs on Claude, `response_format` on OpenAI-compatible servers, with one retry without it for a local server that rejects the parameter — so a stray sentence from the model can't derail a round. Anything essential the model never asked about (type, must-have features) is still asked by the built-in questions afterwards. The final prompt is then rewritten by the model from the structured draft and streamed into the view as it is written. Two sections are never left to the model: "Things I didn't specify" and "How to work with me" are stripped from its output and re-attached exactly as the app wrote them, because small models turn "I haven't decided on X" into decisions and pad the rules with filler. The model is told to mark anything it adds on its own with "(suggested)", and the polished view says so; the Structured tab is always the record of what the user actually said. Filler sub-headings, repeated sections and stray rule lines from smaller models are tidied away too. The app also raises doubts a consultant would — a record-keeper whose data "doesn't need saving", a lookup tool that never says where its information comes from, a beginner picking React — both as a notice the moment the answer is given and as a "worth checking" list on the result screen, each with a button to change that answer. A beginner who never says what they want back gets a sensible default: the simplest thing that runs, with exact setup steps. Every call has a deadline; if one fails or stalls (bad key, no network, CORS, timeout), the app falls back to built-in mode with a notice, so it never dead-ends. A polished prompt that hits the model's output limit is kept and flagged.
 
 Keys are stored only in localStorage and sent only to the chosen provider — fine for a personal tool or a "bring your own key" page, not for a public site where you'd rather hide the key behind a small proxy.
+
+Changing the provider, service, or custom address clears the previous key and model. Enter the key for the new service before testing or saving. Testing a connection or fetching models does not apply unsaved settings.
+
+Prompt edits are saved as you type. Returning from a coverage question without answering keeps your edited prompt; submitting a changed answer rebuilds it from the brief. Editing during an AI polish stops that rewrite so it cannot replace your words.
+
+## Checking changes
+
+Run `npm install` once, then `npm test`. The tests cover the built-in interview, mocked AI providers, prompt editing, settings, history, local serving, and offline caching. They use test credentials and do not call paid AI services.
+
+If Playwright's downloaded browser is unavailable but Chrome is installed, run `$env:PF_BROWSER_CHANNEL='chrome'; npm test` in PowerShell. No build step is needed for the app.
 
 ## Customizing
 

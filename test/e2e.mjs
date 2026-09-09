@@ -116,7 +116,7 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(8787, r));
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ channel: process.env.PF_BROWSER_CHANNEL || undefined });
 const errors = [];
 async function newPage(initSettings) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: 'dark' });

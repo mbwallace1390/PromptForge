@@ -1,36 +1,58 @@
-// PromptForge service worker: lets the installed app open offline. It only handles same-origin GETs;
-// every API call (Claude, OpenAI, OpenRouter, Ollama…) is cross-origin and passes straight through.
-const CACHE = 'promptforge-v1';
+// Cache only PromptForge's public files. API calls and other pages pass straight through.
+// GitHub Pages apps share an origin, so cache ownership must include this worker's scope.
+const CACHE_PREFIX = `promptforge:${self.registration.scope}:`;
+const CACHE = `${CACHE_PREFIX}v2`;
+const SHELL = new URL('./', self.location.href).href;
+const SHELL_PATHS = new Set(['./', 'index.html', 'promptforge.html'].map((p) => new URL(p, SHELL).pathname));
+const ASSET_PATHS = new Set([
+  'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
+].map((p) => new URL(p, SHELL).pathname));
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.add('./')).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.add(SHELL)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin) return;
   if (req.mode === 'navigate') {
+    if (!SHELL_PATHS.has(url.pathname)) return;
     // Network first: an online load is always the latest version; offline falls back to the cached shell.
     e.respondWith(
-      fetch(req)
-        .then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put('./', copy)); return r; })
-        .catch(() => caches.match('./')),
+      (async () => {
+        const cache = await caches.open(CACHE);
+        try {
+          const response = await fetch(req);
+          if (!response.ok) return (await cache.match(SHELL)) || response;
+          // Await the write to keep it alive; a storage failure must not hide a working online app.
+          await cache.put(SHELL, response.clone()).catch(() => {});
+          return response;
+        } catch {
+          return (await cache.match(SHELL)) || Response.error();
+        }
+      })(),
     );
     return;
   }
-  // Manifest, icons, this file: cache first, fill the cache on first sight.
+  if (!ASSET_PATHS.has(url.pathname)) return;
+  // Manifest and icons: cache first, fill this app's cache on first sight.
   e.respondWith(
-    caches.match(req).then((hit) => hit || fetch(req).then((r) => {
-      if (r.ok) { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
-      return r;
-    })),
+    (async () => {
+      const cache = await caches.open(CACHE);
+      const hit = await cache.match(req);
+      if (hit) return hit;
+      const response = await fetch(req);
+      if (response.ok) await cache.put(req, response.clone()).catch(() => {});
+      return response;
+    })(),
   );
 });

@@ -9,4 +9,5 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-start "PromptForge server" /min node serve.mjs --open
+rem Keep a startup error visible so a busy port is not mistaken for a successful launch.
+start "PromptForge server" /min cmd /c "node serve.mjs --open || pause"

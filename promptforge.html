@@ -635,9 +635,11 @@ function aiEnabled() {
   if (settings.provider === 'custom') return !!settings.baseUrl;
   return !!settings.apiKey;
 }
-function currentModel() {
-  return settings.model || (DEFAULT_MODELS[settings.provider] || [''])[0];
+function currentModel(config = settings) {
+  return config.model || (DEFAULT_MODELS[config.provider] || [''])[0];
 }
+// A request keeps the provider and credentials it started with, even if Settings changes mid-flight.
+function settingsSnapshot(config = settings) { return { ...config, freeModels: Array.isArray(config.freeModels) ? [...config.freeModels] : [] }; }
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   store.set('pf_theme', t);
@@ -743,6 +745,23 @@ function reviewKind(s = state) {
 }
 const isReview = (s = state) => reviewKind(s) !== 'none';
 const isReviewOnly = (s = state) => reviewKind(s) === 'review';
+/** Blanket no-edit instructions override a chip; limits on a named area remain part of an approved fix. */
+function reviewDisallowsEdits(answer) {
+  const t = answerText(answer).replace(/’/g, "'");
+  return /\b(?:no|without)\s+(?:any\s+)?(?:code\s+)?(?:changes?|edits?|fixes?)(?!\s+(?:to|in)\b)\b/i.test(t)
+    || /\b(?:do not|don't|never)\s+fix\b/i.test(t)
+    || /\b(?:do not|don't|never)\s+(?:make|apply|implement)\s+(?:any\s+)?(?:changes?|edits?|fixes?|improvements?)\b/i.test(t)
+    || /\b(?:do not|don't|never)\s+(?:change|edit|modify|touch|write)\s+(?:(?:any|the|my|our|existing)\s+)*(?:code|codebase|files?|anything)\b/i.test(t)
+    || /\b(?:wait|ask)[^.!?\n]{0,60}\b(?:approval|permission|confirmation|consent|go-ahead)\b/i.test(t);
+}
+/** A mention of fixes is not permission: AI wording must positively request an immediate action. */
+function reviewRequestsImmediateFixes(answer) {
+  const t = answerText(answer);
+  return !reviewDisallowsEdits(answer) && /^(?:yes[,\s]+)?(?:please\s+)?(?:go ahead and\s+)?fix\b/i.test(t)
+    && /\b(?:now|immediately|straight away|right away)\b/i.test(t);
+}
+const reviewIncludesFixes = (s = state) => isReviewOnly(s) && !reviewDisallowsEdits(s.answers.deliverable)
+  && ((s.answers.deliverable || {}).choices || []).some((c) => /^Fix the top few straight away/i.test(c));
 const EDITOR_ACCESS = "It's open in the AI's editor (Claude Code, Cursor, Copilot)";
 /** The AI can read the code itself, so questions about what the app is and what it is built with are noise. */
 const aiSeesCode = (s = state) => isExisting(s) && /editor/i.test((((s.answers.codeAccess || {}).choices) || []).join(' '));
@@ -965,7 +984,7 @@ const DIMS = [
       if (/\b(just (the |a )?plan|architecture only|no code yet)\b/i.test(text)) return { choices: ['Just the plan / architecture'], note: 'from your description' };
       return null;
     },
-    delegate: 'Start with a short plan, then build the complete thing.',
+    delegate: (s) => (isReviewOnly(s) ? REVIEW_DELIVERABLE : isExisting(s) ? 'Start with a short plan, then make the requested changes to the existing app.' : 'Start with a short plan, then build the complete thing.'),
   },
   {
     // Essential: for a beginner it changes every other section (explanations, deliverable, tool choice).
@@ -1128,7 +1147,7 @@ function pendingDims() {
   const order = { essential: 0, important: 1, optional: 2 };
   let list = DIMS.filter((d) => {
     if (state.asked.includes(d.id)) return false;
-    if (state.answers[d.id] && state.answers[d.id].source !== 'skipped' && hasContent(state.answers[d.id]) && !isUnconfirmed(state.answers[d.id])) return false;
+    if (state.answers[d.id] && state.answers[d.id].source !== 'skipped' && hasContent(state.answers[d.id]) && !isUnconfirmed(state.answers[d.id]) && !state.answers[d.id].needsConfirmation) return false;
     if (state.answers[d.id] && state.answers[d.id].source === 'skipped') return false;
     if (d.when && !d.when(state)) return false;
     return true;
@@ -1192,10 +1211,10 @@ function canonicalize(dimId, answer) {
     // "A bulleted list of issues" → our ranked-list chip, so the precise wording (what, why, effort, risk, then wait) survives.
     const t = text.toLowerCase();
     let pick = null;
-    if (isReviewOnly()) pick = /report|summary|document|write-?up/.test(t) ? 'A written report I can read later' : /\bfix/.test(t) ? 'Fix the top few straight away, then list the rest' : /list|backlog|rank|priorit|bullet|suggest|recommend/.test(t) ? 'A ranked list of improvements — no code changes yet' : null;
+    if (isReviewOnly()) pick = reviewRequestsImmediateFixes(answer) ? 'Fix the top few straight away, then list the rest' : /report|summary|document|write-?up/.test(t) ? 'A written report I can read later' : /list|backlog|rank|priorit|bullet|suggest|recommend/.test(t) ? 'A ranked list of improvements — no code changes yet' : null;
     else if (isExisting()) pick = /diff|patch|changed parts/.test(t) ? 'Only the changed parts (a patch / diff)' : /step/.test(t) ? 'Step-by-step edits I make myself' : /plan/.test(t) ? 'A plan first, then the changes' : /full|complete|whole|entire|updated file/.test(t) ? 'Full updated files' : null;
     else { const d = DIM_BY_ID.deliverable.detect(text); pick = d && d.choices ? d.choices[0] : /complete|working code|whole app/.test(t) ? 'Complete, working code' : /plan/.test(t) ? 'A build plan first, then the code' : null; }
-    if (pick) return { ...answer, choices: [pick], text: '', via: undefined }; // a chip now: the canned wording applies
+    if (pick) return { ...answer, choices: [pick], text: isReviewOnly() ? ((answer.choices || []).length === 1 && answer.choices[0] === pick ? answer.text || '' : text) : '', via: undefined }; // keep review limits alongside the canonical chip
   }
   return answer;
 }
@@ -1212,6 +1231,8 @@ function defaultedDim(d) {
 function commitAnswer(id, answer) {
   const q = questionById(id);
   if (!q) return;
+  const previousType = typeOf(state.answers);
+  const previousDeliverables = DIM_BY_ID.deliverable.options();
   if (q.kind === 'dim') {
     state.answers[id] = answer;
   } else {
@@ -1220,11 +1241,15 @@ function commitAnswer(id, answer) {
     // Map the answer onto a dimension when the AI told us which one it covers.
     if (aq.covers && DIM_BY_ID[aq.covers]) {
       if (answer.source === 'skipped') {
-        if (!state.answers[aq.covers] || state.answers[aq.covers].source === 'detected') { /* keep whatever we detected */ }
+        const mapped = state.answers[aq.covers];
+        // Back then Skip withdraws this answer, but must not erase a different question's answer.
+        if (mapped && (mapped.questionId === id || (!mapped.questionId && mapped.via === 'ai' && mapped.q === aq.question))) delete state.answers[aq.covers];
       } else {
-        state.answers[aq.covers] = canonicalize(aq.covers, { ...answer, via: 'ai', q: aq.question });
+        state.answers[aq.covers] = { ...canonicalize(aq.covers, { ...answer, via: 'ai', q: aq.question }), questionId: id };
       }
-    } else if (answer.source !== 'skipped') {
+    } else if (answer.source === 'skipped') {
+      state.extraQA = state.extraQA.filter((x) => x.id !== id);
+    } else {
       const idx = state.extraQA.findIndex((x) => x.id === id);
       const entry = { id, q: aq.question, a: answer.source === 'delegate' ? '(let the AI decide)' : answerText(answer) };
       if (idx >= 0) state.extraQA[idx] = entry; else state.extraQA.push(entry);
@@ -1232,6 +1257,23 @@ function commitAnswer(id, answer) {
   }
   if (!state.asked.includes(id)) state.asked.push(id);
   runDetection();
+  if (typeOf(state.answers) !== previousType) {
+    // Platforms belong to the chosen type; a previous Android answer cannot describe a desktop app.
+    delete state.answers.platform;
+    state.asked = state.asked.filter((askedId) => askedId !== 'platform');
+    runDetection();
+  }
+  const delivery = state.answers.deliverable;
+  if (delivery && delivery.choices && delivery.choices.length) {
+    const available = DIM_BY_ID.deliverable.options();
+    const choices = delivery.choices.filter((c) => !previousDeliverables.includes(c) || available.includes(c));
+    if (choices.length !== delivery.choices.length) {
+      // A mode change can remove a canned deliverable. Keep the person's own detail and invite a fresh choice.
+      if (choices.length || (delivery.text || '').trim()) state.answers.deliverable = { ...delivery, choices, needsConfirmation: true };
+      else delete state.answers.deliverable;
+      state.asked = state.asked.filter((askedId) => askedId !== 'deliverable');
+    }
+  }
 }
 
 /** Brief strength: weighted coverage of the dimensions (delegating counts as partial credit). */
@@ -1334,6 +1376,19 @@ function deliverableBody() {
   if (!t) {
     if (isReviewOnly()) return REVIEW_DELIVERABLE; // the sensible default for a review: propose, don't touch
     return beginnerDeliverable() ? (isExisting() ? "I'm new to this, so give me the complete updated version of every file you change, with exact steps to put them in place and run the app." : BEGINNER_DELIVERABLE) + alsoReview : '';
+  }
+  if (isReviewOnly()) {
+    const answer = state.answers.deliverable;
+    const choices = (answer.choices || []).join(' ');
+    const extra = (answer.text || '').trim();
+    const withDetail = (body) => body + (extra ? '\n\n' + extra : '');
+    // Only selected chips receive canned wording; never reinterpret a free-text restriction as permission.
+    if (/ranked list of improvements/i.test(choices)) return withDetail(REVIEW_DELIVERABLE);
+    if (/^fix the top few/i.test(choices)) return withDetail(reviewIncludesFixes()
+      ? 'Fix the two or three improvements with the most impact straight away — tell me what they are before you touch anything — then list the rest, ranked, for me to choose from.'
+      : REVIEW_DELIVERABLE);
+    if (/written report/i.test(choices)) return withDetail('A written report I can read later: findings grouped by area, each with why it matters and what you would do about it. No code changes.');
+    return viaAi(answer) ? aiQuoted(answer) : t;
   }
   if (viaAi(state.answers.deliverable)) return aiQuoted(state.answers.deliverable) + alsoReview;
   // Review chips
@@ -1468,7 +1523,9 @@ function buildChangeRequest() {
   let what = state.description.trim();
   const purpose = val('purpose');
   if (purpose) what += `\n\nWhy: ${purpose}`;
-  if (kind === 'review') what += "\n\nI want you to review the app as it is and tell me what you would improve, ranked. Don't change any code until I've picked from your list.";
+  if (kind === 'review') what += reviewIncludesFixes()
+    ? '\n\nReview the app as it is, fix the two or three improvements with the most impact, then give me the remaining improvements as a ranked list of suggestions. Tell me which fixes you will make before you edit; leave all other findings for me to choose from.'
+    : "\n\nI want you to review the app as it is and tell me what you would improve, ranked. Don't change any code until I've picked from your list.";
   if (kind === 'both') what += "\n\nMake the changes listed below. Beyond those, tell me what else you would improve — as suggestions I can choose from, not as changes.";
   out += section(kind === 'review' ? 'What I want' : 'What I want changed', what);
 
@@ -1571,8 +1628,11 @@ function rulesBody() {
   const skill = skillBody(); if (skill) rules.push(skill);
   if (isExisting()) rules.push('Read the existing code before proposing anything, and follow its conventions — naming, structure, libraries — rather than introducing new ones.');
   if (isReviewOnly()) {
-    // A review changes nothing, so the rules about making changes do not apply.
-    rules.push("Don't change any code until I've picked from your list. Suggest, rank, explain — then wait for me.");
+    // The default review waits for a choice; the explicit top-few-fixes option grants only that limited scope.
+    if (reviewIncludesFixes()) {
+      rules.push('Review first, then fix only the two or three improvements with the most impact. Tell me which fixes you will make before editing. Leave every other finding as a suggestion for me to choose from.');
+      rules.push('Keep each fix focused and preserve behavior outside those fixes. For every changed file, explain what changed and why, verify the fixes, and give me exact steps to check them.');
+    } else rules.push("Don't change any code until I've picked from your list. Suggest, rank, explain — then wait for me.");
     rules.push("Before you suggest anything, restate your understanding of this app in a few sentences and list the assumptions you're making.");
     rules.push('Give me the whole list in one message, most impactful first, and say for each item how sure you are and what you would need to check.');
     rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
@@ -1629,12 +1689,19 @@ function pinSections(text) {
     const sectionEnd = () => { let j = i; while (j + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[j + 1]); if (n && n[1].length <= level) break; j++; } return j; };
     if (/^open (questions|points|issues)/.test(key) && !seen.has(key)) {
       // Small models pad this section with invented doubts. Delegated items are already covered by the delegate
-      // lines; a review exists because the person has no list; and more than four "doubts" is filler, not doubt.
+      // lines; a review exists because the person has no list; and more than three "doubts" is filler, not doubt.
       const end = sectionEnd();
       const body = lines.slice(i + 1, end + 1).filter((l) => !/let the ai decide/i.test(l));
-      const bullets = body.filter((l) => /^\s*(?:[-*•]|\d+[.)])\s/.test(l)).length;
+      let questions = 0, inQuestion = false;
+      for (const line of body) {
+        if (!line.trim()) { inQuestion = false; continue; }
+        if (/^#{1,6}\s/.test(line)) continue;
+        // A list item or plain paragraph is one doubt; line wrapping stays within that doubt.
+        if (/^\s*(?:[-*•]|\d+[.)])\s/.test(line) || !inQuestion) questions++;
+        inQuestion = true;
+      }
       seen.add(key);
-      if (!isReviewOnly() && bullets > 0 && bullets <= 4) kept.push(lines[i], ...body);
+      if (!isReviewOnly() && questions > 0 && questions <= 3) kept.push(lines[i], ...body);
       i = end;
       continue;
     }
@@ -1730,7 +1797,7 @@ Rules:
 - Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing. Open questions are the person's own uncertainties, written as things they do not know ("I'm not sure whether…") — never questions addressed to the person, never about anything already settled in the draft's "What I want from you" or "What matters most", at most three, and only when the draft itself shows a real doubt. A review request has none: "surprise me" is the request. Never pad this section.
 - Use Markdown headings ("## Section") for sections, never bold lines, and never add sub-headings such as "Overview" inside a section. Structure: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
 - If the draft is a "Change request" for an app that already exists, use this structure instead: title; what I want changed and why; the existing app (what it is, what it is built with, how you reach the code); what matters most, if present; what should change, numbered; what must stay the same; how I run and test it; then connections, constraints, out of scope, what to deliver, success criteria, open questions.
-- If the draft is a "Review request", keep it a request for suggestions: title; what I want (a review, no changes yet); the existing app; what matters most; known problems, if any; what must stay the same; how I run and test it; what to deliver; open questions. Never write the list of improvements yourself — the AI that receives this prompt will, after reading the code.
+- If the draft is a "Review request", preserve its requested scope: suggestions with no changes by default; if the person explicitly chose the top-few-fixes deliverable, keep that limited permission to fix and leave the rest as suggestions. Use: title; what I want; the existing app; what matters most; known problems, if any; what must stay the same; how I run and test it; what to deliver; open questions. Never write the list of improvements yourself — the AI that receives this prompt will, after reading the code.
 - The person is asking; the AI that receives this prompt does the work. Never write plans or promises in the person's voice ("I'll examine the codebase", "Please let me know if you agree").
 - Do not write a "What I want from you", "How to work with me" or "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Those three sections are appended afterwards exactly as the person wrote them.
 - Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
@@ -1765,14 +1832,15 @@ function networkError(e) {
  * on its first call — measured 33 s for a 7B model on a laptop GPU — and a non-streaming reply sends
  * nothing until it is finished, so local gets three minutes; cloud APIs fail fast or not at all.
  */
-function apiTimeoutMs() { return settings.apiTimeoutMs || (settings.provider === 'custom' ? 180000 : 60000); }
+function apiTimeoutMs(config = settings) { return config.apiTimeoutMs || (config.provider === 'custom' ? 180000 : 60000); }
 async function fetchWithTimeout(url, init, ms, signal) {
   const ctl = new AbortController();
   const limit = ms || apiTimeoutMs();
   let timer = setTimeout(() => ctl.abort(), limit);
   const touch = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), limit); };
-  const done = () => clearTimeout(timer);
-  if (signal) signal.addEventListener('abort', () => ctl.abort(), { once: true }); // caller cancelled (new polish, restart)
+  const onAbort = () => ctl.abort();
+  const done = () => { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); };
+  if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', onAbort, { once: true }); }
   try {
     const r = await fetch(url, { ...init, signal: ctl.signal });
     return { r, touch, done };
@@ -1805,12 +1873,12 @@ async function readSSE(r, touch, onEvent) {
   flush();
 }
 const API = {
-  anthropicHeaders() {
-    return { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  anthropicHeaders(config = settings) {
+    return { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
   },
-  openaiBase() { return settings.provider === 'openai' ? 'https://api.openai.com/v1' : String(settings.baseUrl || '').replace(/\/+$/, ''); },
-  openaiHeaders() { const h = { 'Content-Type': 'application/json' }; if (settings.apiKey) h.Authorization = 'Bearer ' + settings.apiKey; return h; },
-  anthropicBase() { return String(settings.anthropicBase || 'https://api.anthropic.com').replace(/\/+$/, ''); },
+  openaiBase(config = settings) { return config.provider === 'openai' ? 'https://api.openai.com/v1' : String(config.baseUrl || '').replace(/\/+$/, ''); },
+  openaiHeaders(config = settings) { const h = { 'Content-Type': 'application/json' }; if (config.apiKey) h.Authorization = 'Bearer ' + config.apiKey; return h; },
+  anthropicBase(config = settings) { return String(config.anthropicBase || 'https://api.anthropic.com').replace(/\/+$/, ''); },
   /**
    * One chat completion. Resolves to { text, truncated }: `truncated` means the model hit the output
    * cap, so the caller decides whether a cut-off answer is still usable.
@@ -1819,35 +1887,39 @@ const API = {
    * - onDelta(textSoFar): stream the reply and call this as it grows.
    * - signal: caller-side cancellation.
    */
-  async chat(opts) {
+  async chat(opts, config = settings) {
     const o = { maxTokens: 16000, ...opts };
-    // Each recovery below fires at most once, so this ends within four attempts.
+    const cfg = settingsSnapshot(config);
+    // Each recovery below fires at most once, so this ends within five attempts.
     for (;;) {
       try {
-        return await this.chatOnce(o);
+        if (o.signal && o.signal.aborted) throw new DOMException('Request cancelled', 'AbortError');
+        return await this.chatOnce(o, cfg);
       } catch (e) {
         const msg = String(e && e.message);
         if (o.signal && o.signal.aborted) throw networkError(e);
         // The service rejected the fallback chain (its limits change): ask again without it.
         if (!o.noChain && /^400\b/.test(msg) && /models/i.test(msg)) { o.noChain = true; continue; }
+        // Some compatible services require the newer cap name. Keep the same limit on the retry.
+        if (cfg.provider === 'custom' && !o.completionTokenLimit && /^(400|422)\b/.test(msg) && /\bmax_tokens\b/.test(msg) && /\bmax_completion_tokens\b/.test(msg)) { o.completionTokenLimit = true; continue; }
         // A local / OpenAI-compatible server may not know response_format. Ask again without it —
         // the tolerant JSON parser downstream still copes with a plain-text reply.
-        if (o.schema && settings.provider === 'custom' && /^(400|422)\b/.test(msg)) { delete o.schema; continue; }
+        if (o.schema && cfg.provider === 'custom' && /^(400|422)\b/.test(msg)) { delete o.schema; continue; }
         // Free tiers rate-limit in bursts; a short pause and one more try clears most of them.
         if (/^429\b/.test(msg) && !o.retried429) { o.retried429 = true; await new Promise((r) => setTimeout(r, 1500)); continue; }
         throw networkError(e);
       }
     }
   },
-  async chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal, noChain }) {
+  async chatOnce({ system, user, maxTokens, effort, schema, onDelta, signal, noChain, completionTokenLimit }, config) {
     const stream = typeof onDelta === 'function';
-    if (settings.provider === 'anthropic') {
-      const body = { model: currentModel(), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] };
+    if (config.provider === 'anthropic') {
+      const body = { model: currentModel(config), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] };
       if (effort || schema) body.output_config = {};
       if (effort) body.output_config.effort = effort;
       if (schema) body.output_config.format = { type: 'json_schema', schema };
       if (stream) body.stream = true;
-      const { r, touch, done } = await fetchWithTimeout(this.anthropicBase() + '/v1/messages', { method: 'POST', headers: this.anthropicHeaders(), body: JSON.stringify(body) }, 0, signal);
+      const { r, touch, done } = await fetchWithTimeout(this.anthropicBase(config) + '/v1/messages', { method: 'POST', headers: this.anthropicHeaders(config), body: JSON.stringify(body) }, apiTimeoutMs(config), signal);
       try {
         if (!stream) {
           const j = await parseResponse(r);
@@ -1862,20 +1934,23 @@ const API = {
           else if (type === 'message_delta' && j.delta) { stop = j.delta.stop_reason || stop; details = j.delta.stop_details || details; }
           else if (type === 'error') throw new Error((j.error && j.error.message) || 'stream error');
         });
+        if (!stop) throw new Error('the AI response ended before it finished');
         return this.anthropicResult(text, stop, details);
       } finally { done(); }
     }
-    const body = { model: currentModel(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+    const body = { model: currentModel(config), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+    // OpenAI reasoning models use the modern name; local servers document the original max_tokens.
+    body[config.provider === 'openai' || completionTokenLimit ? 'max_completion_tokens' : 'max_tokens'] = maxTokens;
     if (schema) body.response_format = { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema } };
     if (stream) body.stream = true;
     // OpenRouter moves on to the next listed model when one is rate-limited or down (its "models" routing
     // parameter, at most 3 entries). Free models are shared and busy in bursts, so two other free ones
     // from Fetch list stand in.
-    if (!noChain && settings.provider === 'custom' && settings.preset === 'openrouter' && Array.isArray(settings.freeModels)) {
-      const chain = [body.model, ...settings.freeModels.filter((m) => m !== body.model)].slice(0, 3);
+    if (!noChain && config.provider === 'custom' && config.preset === 'openrouter' && Array.isArray(config.freeModels)) {
+      const chain = [body.model, ...config.freeModels.filter((m) => m !== body.model)].slice(0, 3);
       if (chain.length > 1) body.models = chain;
     }
-    const { r, touch, done } = await fetchWithTimeout(this.openaiBase() + '/chat/completions', { method: 'POST', headers: this.openaiHeaders(), body: JSON.stringify(body) }, 0, signal);
+    const { r, touch, done } = await fetchWithTimeout(this.openaiBase(config) + '/chat/completions', { method: 'POST', headers: this.openaiHeaders(config), body: JSON.stringify(body) }, apiTimeoutMs(config), signal);
     try {
       if (!stream) {
         const j = await parseResponse(r);
@@ -1894,6 +1969,7 @@ const API = {
         if (typeof piece === 'string' && piece) { text += piece; onDelta(text); }
         if (choice.finish_reason) stop = choice.finish_reason;
       });
+      if (!stop) throw new Error('the AI response ended before it finished');
       return this.openaiResult(text, stop);
     } finally { done(); }
   },
@@ -1905,11 +1981,12 @@ const API = {
     if (stop === 'content_filter') throw new Error('the model declined this request');
     return { text, truncated: stop === 'length' };
   },
-  async models() {
+  async models(config = settings, signal) {
+    const cfg = settingsSnapshot(config);
     try {
-      const req = settings.provider === 'anthropic'
-        ? await fetchWithTimeout(this.anthropicBase() + '/v1/models?limit=100', { headers: this.anthropicHeaders() }, 20000)
-        : await fetchWithTimeout(this.openaiBase() + '/models', { headers: this.openaiHeaders() }, 20000);
+      const req = cfg.provider === 'anthropic'
+        ? await fetchWithTimeout(this.anthropicBase(cfg) + '/v1/models?limit=100', { headers: this.anthropicHeaders(cfg) }, 20000, signal)
+        : await fetchWithTimeout(this.openaiBase(cfg) + '/models', { headers: this.openaiHeaders(cfg) }, 20000, signal);
       let j;
       try { j = await parseResponse(req.r); } finally { req.done(); }
       return (j.data || j.models || []).map((m) => m.id || m.name || m.model).filter(Boolean); // ordering is the caller's job (sortModels)
@@ -2082,19 +2159,25 @@ function readAnswer() {
 async function advance() {
   if (state.single) { state.single = false; await buildResult(); return; }
   const i = state.asked.indexOf(state.current);
-  if (i >= 0 && i < state.asked.length - 1) { showQuestion(state.asked[i + 1]); return; } // walking forward after "Back"
+  if (i >= 0) {
+    const next = state.asked.slice(i + 1).find(questionApplies);
+    if (next) { showQuestion(next); return; } // walking forward after "Back"
+  }
   let id = nextQuestionId();
   if (!id && state.aiMode && !state.aiDone) {
+    const interviewId = state.id;
     showThinking(state.aiRound === 0
       ? (settings.provider === 'custom' ? 'Reading your idea and working out what to ask… (a local model can take a minute to load the first time)' : 'Reading your idea and working out what to ask…')
       : 'Checking whether anything important is still missing…');
     try {
       const qs = await aiFetchQuestions();
+      if (state.id !== interviewId || state.screen !== 'refine') return;
       state.aiRound++;
       state.aiQuestions.push(...qs);
       if (!qs.length || state.aiRound >= maxRounds()) state.aiDone = true;
       if (!qs.length && state.aiRound === 1) toast('The AI thinks your description already covers the essentials.');
     } catch (e) {
+      if (state.id !== interviewId || state.screen !== 'refine') return;
       console.warn('AI question round failed:', e);
       toast(`AI unavailable — ${e.message}. Using built-in questions.`, 'bad');
       state.aiMode = false;
@@ -2120,9 +2203,15 @@ function onNext() {
 }
 function onSkip() { commitAnswer(state.current, { choices: [], text: '', source: 'skipped' }); invalidatePolish(); advance(); }
 function onDelegate() { commitAnswer(state.current, { choices: [], text: '', source: 'delegate' }); invalidatePolish(); advance(); }
+/** Back/Next history follows only questions that still apply after an earlier answer changes. */
+function questionApplies(id) {
+  const d = DIM_BY_ID[id] || DIM_BY_ID[(state.aiQuestions.find((q) => q.id === id) || {}).covers];
+  return !d || !d.when || d.when(state);
+}
 function onBack() {
   const i = state.asked.indexOf(state.current);
-  const prev = i > 0 ? state.asked[i - 1] : (i === -1 && state.asked.length ? state.asked[state.asked.length - 1] : null);
+  const previous = state.asked.slice(0, i >= 0 ? i : state.asked.length).filter(questionApplies);
+  const prev = previous[previous.length - 1];
   if (prev) showQuestion(prev);
 }
 function onChipClick(e) {
@@ -2167,6 +2256,7 @@ function askSingle(id) {
 async function answerMore() {
   state.aiMode = false; state.depth = 'thorough'; state.single = false;
   if (!pendingDims().length) { toast("You've answered everything — nice."); return; }
+  state.current = null; // Resume unanswered dimensions, not the history position of a single-answer edit.
   showScreen('refine');
   await advance();
 }
@@ -2253,6 +2343,7 @@ function cancelPolish() { if (polishCtl) { polishCtl.abort(); polishCtl = null; 
 const stripOpenFence = (s) => s.replace(/^\s*```(?:markdown|md)?[ \t]*\n?/i, '');
 async function polish() {
   if (!aiEnabled()) { openSettings(); return; }
+  if (!$('#prompt-edit').classList.contains('hidden')) toggleEdit();
   if (!state.prompt.structured) state.prompt.structured = buildStructuredPrompt();
   cancelPolish();
   const ctl = (polishCtl = new AbortController());
@@ -2260,7 +2351,11 @@ async function polish() {
   // The reply streams straight into the view: the reader watches it arrive instead of waiting on a spinner.
   const view = $('#prompt-view');
   let shown = false, frame = 0, latest = '';
-  const paint = () => { frame = 0; view.innerHTML = highlightMd(latest); view.scrollTop = view.scrollHeight; };
+  const paint = () => {
+    frame = 0;
+    if (ctl.signal.aborted || state.prompt.view !== 'polished' || !$('#prompt-edit').classList.contains('hidden')) return;
+    view.innerHTML = highlightMd(latest); view.scrollTop = view.scrollHeight;
+  };
   const onDelta = (text) => {
     if (ctl.signal.aborted || !$('#prompt-edit').classList.contains('hidden')) return; // never fight the editor
     if (!shown) { shown = true; state.prompt.view = 'polished'; $('#tab-polished').classList.add('on'); $('#tab-structured').classList.remove('on'); }
@@ -2275,7 +2370,7 @@ async function polish() {
     if (!raw.trim()) throw new Error('empty response');
     state.prompt.polished = pinSections(cleanMarkdown(raw));
     state.prompt.truncated = truncated; // a cut-off prompt is still useful; the result screen warns about it
-    state.prompt.view = 'polished';
+    if (!shown) state.prompt.view = 'polished'; // Once streaming starts, keep the reader's selected tab.
     if (frame) cancelAnimationFrame(frame);
     renderResult(); saveHistory();
     toast(truncated ? 'Polished, but the model ran out of room — check the end' : 'Polished with AI ✦', truncated ? 'bad' : 'ok');
@@ -2285,14 +2380,17 @@ async function polish() {
     toast('Polish failed — ' + e.message, 'bad');
     if (shown) { if (frame) cancelAnimationFrame(frame); renderResult(); } // put the structured prompt back
   } finally {
+    if (frame) cancelAnimationFrame(frame);
     if (polishCtl === ctl) { polishCtl = null; setPolishing(false); }
   }
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; }
   catch {
-    try { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); return true; }
+    const ta = document.createElement('textarea');
+    try { ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); return document.execCommand('copy'); }
     catch { return false; }
+    finally { ta.remove(); }
   }
 }
 function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'prompt'; }
@@ -2313,10 +2411,16 @@ async function openIn(site) {
 }
 function toggleEdit() {
   const view = $('#prompt-view'), ed = $('#prompt-edit'), btn = $('#edit-btn');
-  if (ed.classList.contains('hidden')) { ed.value = currentPromptText(); ed.classList.remove('hidden'); view.classList.add('hidden'); btn.textContent = '✓ Done'; ed.focus(); }
+  if (ed.classList.contains('hidden')) {
+    // Editing takes ownership of the text; a late AI response must not replace it.
+    cancelPolish();
+    if (state.prompt.view === 'polished' && !state.prompt.polished) state.prompt.view = 'structured';
+    ed.dataset.promptView = state.prompt.view;
+    ed.value = currentPromptText(); ed.classList.remove('hidden'); view.classList.add('hidden'); btn.textContent = '✓ Done'; ed.focus();
+  }
   else {
     const t = ed.value;
-    if (state.prompt.view === 'polished' && state.prompt.polished) state.prompt.polished = t; else state.prompt.structured = t;
+    state.prompt[ed.dataset.promptView === 'polished' ? 'polished' : 'structured'] = t;
     state.prompt.edited = true;
     ed.classList.add('hidden'); view.classList.remove('hidden'); view.innerHTML = highlightMd(t); btn.textContent = '✎ Edit';
     saveHistory();
@@ -2324,9 +2428,14 @@ function toggleEdit() {
 }
 
 /* ---------- 8. History ---------- */
+function readHistory() {
+  const saved = store.get('pf_history', []);
+  // An invalid entry must not prevent the rest of the app from starting.
+  return Array.isArray(saved) ? saved.filter((entry) => entry && typeof entry === 'object' && typeof entry.id === 'string') : [];
+}
 function saveHistory() {
   if (!state.id) state.id = uid();
-  const list = store.get('pf_history', []);
+  const list = readHistory();
   const entry = {
     id: state.id, ts: Date.now(), title: currentTitle(), description: state.description, answers: state.answers, extraQA: state.extraQA,
     asked: state.asked, aiQuestions: state.aiQuestions, prompt: state.prompt, strength: strength().pct, depth: state.depth,
@@ -2337,7 +2446,7 @@ function saveHistory() {
   renderRecent();
 }
 function loadHistory(id) {
-  const e = store.get('pf_history', []).find((x) => x.id === id); if (!e) return;
+  const e = readHistory().find((x) => x.id === id); if (!e) return;
   cancelPolish();
   resetState();
   Object.assign(state, {
@@ -2348,26 +2457,41 @@ function loadHistory(id) {
   showScreen('result'); renderResult();
 }
 function renderRecent() {
-  const list = store.get('pf_history', []);
+  const list = readHistory();
   $('#recent').classList.toggle('hidden', !list.length);
   $('#recent-list').innerHTML = list.map((e) => `
     <div class="recent-item">
       <div class="t"><b>${esc(e.title || 'Untitled')}</b><span>${new Date(e.ts).toLocaleString()} · ${e.strength || 0}% ${e.prompt && e.prompt.polished ? '· ✦ polished' : ''}</span></div>
-      <button class="btn sm" type="button" data-load="${e.id}">Open</button>
-      <button class="btn icon ghost sm" type="button" data-del="${e.id}" aria-label="Delete">✕</button>
+      <button class="btn sm" type="button" data-load="${esc(e.id)}">Open</button>
+      <button class="btn icon ghost sm" type="button" data-del="${esc(e.id)}" aria-label="Delete">✕</button>
     </div>`).join('');
 }
-function deleteHistory(id) { store.set('pf_history', store.get('pf_history', []).filter((x) => x.id !== id)); renderRecent(); }
+function deleteHistory(id) { store.set('pf_history', readHistory().filter((x) => x.id !== id)); renderRecent(); }
 
 /* --- Settings modal --- */
 const draft = {};
+let settingsCtl = null;
+function cancelSettingsRequest() {
+  if (settingsCtl) { settingsCtl.abort(); settingsCtl = null; }
+  $('#s-fetch-models').disabled = false; $('#s-fetch-models').textContent = 'Fetch list';
+  $('#s-test').disabled = false;
+}
+function beginSettingsRequest() { cancelSettingsRequest(); return (settingsCtl = new AbortController()); }
+function settingsRequestCurrent(ctl) { return settingsCtl === ctl && !ctl.signal.aborted; }
+// Keys and model ids belong to one destination; a changed provider/address needs its own values.
+function clearDraftCredentials() {
+  draft.apiKey = ''; draft.model = ''; draft.freeModels = [];
+  $('#s-key').value = ''; $('#s-model').value = ''; $('#model-list').innerHTML = '';
+  $('#s-key').type = 'password'; $('#s-key-toggle').textContent = 'Show';
+}
 function openSettings() {
+  cancelSettingsRequest();
   Object.assign(draft, settings);
   $('#settings-modal').classList.remove('hidden');
   renderSettings();
   $('#s-test-result').textContent = '';
 }
-function closeSettings() { $('#settings-modal').classList.add('hidden'); }
+function closeSettings() { cancelSettingsRequest(); $('#settings-modal').classList.add('hidden'); }
 function renderSettings() {
   $$('#provider-seg button').forEach((b) => b.classList.toggle('on', b.dataset.p === draft.provider));
   const p = draft.provider;
@@ -2431,12 +2555,6 @@ function readSettingsForm() {
   draft.model = $('#s-model').value.trim();
   draft.autoPolish = $('#s-autopolish').checked;
 }
-async function withTempSettings(fn) {
-  readSettingsForm();
-  const backup = { ...settings };
-  Object.assign(settings, draft);
-  try { return await fn(); } finally { Object.assign(settings, backup); }
-}
 function wipeAll() {
   ['pf_settings', 'pf_history', 'pf_theme'].forEach((k) => store.del(k));
   location.reload();
@@ -2470,13 +2588,30 @@ function init() {
   $('#q-delegate').addEventListener('click', onDelegate);
   $('#q-back').addEventListener('click', onBack);
   $('#q-free').addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') onNext(); });
-  $('#finish-btn').addEventListener('click', async () => { if (state.single) { state.single = false; } await buildResult(); });
+  $('#finish-btn').addEventListener('click', async () => {
+    if (state.single) {
+      // This button cancels a one-question visit; keep the existing prompt, including manual edits.
+      state.single = false; showScreen('result'); renderResult(); return;
+    }
+    const { q, answer } = readAnswer();
+    if (q && (answer.choices.length || answer.text)) { commitAnswer(state.current, answer); invalidatePolish(); }
+    await buildResult();
+  });
 
   $('#tab-structured').addEventListener('click', () => { state.prompt.view = 'structured'; renderResult(); });
   $('#tab-polished').addEventListener('click', () => { if (state.prompt.polished) { state.prompt.view = 'polished'; renderResult(); } });
-  $('#copy-btn').addEventListener('click', async () => { toast((await copyText(currentPromptText())) ? 'Prompt copied to clipboard' : 'Copy failed — select the text and copy manually', 'ok'); });
+  $('#copy-btn').addEventListener('click', async () => {
+    const copied = await copyText(currentPromptText());
+    toast(copied ? 'Prompt copied to clipboard' : 'Copy failed — select the text and copy manually', copied ? 'ok' : 'bad');
+  });
   $('#download-btn').addEventListener('click', downloadPrompt);
   $('#edit-btn').addEventListener('click', toggleEdit);
+  $('#prompt-edit').addEventListener('input', () => {
+    // Keep the saved prompt current even if the user switches tabs or leaves without pressing Done.
+    const key = $('#prompt-edit').dataset.promptView === 'polished' ? 'polished' : 'structured';
+    state.prompt[key] = $('#prompt-edit').value; state.prompt.edited = true;
+    saveHistory();
+  });
   $('#open-claude').addEventListener('click', () => openIn('claude'));
   $('#open-chatgpt').addEventListener('click', () => openIn('chatgpt'));
   for (const id of ['#coverage', '#sanity']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-ask]'); if (b) { cancelPolish(); askSingle(b.dataset.ask); } });
@@ -2496,26 +2631,38 @@ function init() {
   $('#s-preset').innerHTML = PRESETS.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join('');
   $('#provider-seg').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
+    if (draft.provider === b.dataset.p) return;
+    cancelSettingsRequest();
     readSettingsForm(); draft.provider = b.dataset.p;
+    clearDraftCredentials(); $('#s-test-result').textContent = '';
     if (draft.provider === 'custom') { draft.preset = draft.preset || presetFor(draft.baseUrl); if (!draft.baseUrl) draft.baseUrl = PRESET_BY_ID[draft.preset].baseUrl; }
     renderSettings();
   });
   $('#s-preset').addEventListener('change', () => {
-    // A new service means a new address and a new model list; a key may or may not carry over.
+    // Credentials are never carried from one service to another.
+    cancelSettingsRequest();
     readSettingsForm();
     const preset = PRESET_BY_ID[draft.preset] || PRESET_BY_ID.other;
     if (preset.baseUrl) draft.baseUrl = preset.baseUrl;
-    draft.model = '';
-    draft.freeModels = [];
-    $('#model-list').innerHTML = '';
+    clearDraftCredentials();
     $('#s-test-result').textContent = '';
     renderSettings();
   });
+  $('#s-baseurl').addEventListener('input', () => {
+    cancelSettingsRequest(); $('#s-test-result').textContent = '';
+    const base = withScheme($('#s-baseurl').value.trim());
+    if (base.replace(/\/+$/, '') !== String(draft.baseUrl || '').replace(/\/+$/, '')) clearDraftCredentials();
+    draft.baseUrl = base;
+  });
+  for (const id of ['#s-key', '#s-model']) $(id).addEventListener('input', () => { cancelSettingsRequest(); $('#s-test-result').textContent = ''; });
   $('#s-key-toggle').addEventListener('click', () => { const i = $('#s-key'); i.type = i.type === 'password' ? 'text' : 'password'; $('#s-key-toggle').textContent = i.type === 'password' ? 'Show' : 'Hide'; });
   $('#s-fetch-models').addEventListener('click', async () => {
+    readSettingsForm();
+    const cfg = settingsSnapshot(draft), ctl = beginSettingsRequest();
     const btn = $('#s-fetch-models'); btn.disabled = true; btn.textContent = 'Fetching…';
     try {
-      const ids = sortModels(await withTempSettings(() => API.models()), draft.provider === 'custom' ? draft.preset : '');
+      const ids = sortModels(await API.models(cfg, ctl.signal), cfg.provider === 'custom' ? cfg.preset : '');
+      if (!settingsRequestCurrent(ctl)) return;
       $('#model-list').innerHTML = ids.map((m) => `<option value="${esc(m)}">`).join('');
       const freeIds = ids.filter((m) => /:free$/i.test(m));
       // Remembered so a busy free model can be swapped for another one at call time.
@@ -2524,23 +2671,27 @@ function init() {
       $('#s-test-result').textContent = `${ids.length} models loaded${freeIds.length ? `, ${freeIds.length} free (ending in ":free")` : ''} — start typing in the model box to pick one.`
         + (keyNeeded() && !draft.apiKey ? ' Now paste your key above, then Test connection.' : '');
       if (!$('#s-model').value && ids.length) $('#s-model').value = ids[0];
-    } catch (e) { $('#s-test-result').textContent = 'Could not fetch models: ' + e.message + failureHint(e); }
-    finally { btn.disabled = false; btn.textContent = 'Fetch list'; }
+    } catch (e) { if (settingsRequestCurrent(ctl)) $('#s-test-result').textContent = 'Could not fetch models: ' + e.message + failureHint(e); }
+    finally { if (settingsRequestCurrent(ctl)) cancelSettingsRequest(); }
   });
   $('#s-test').addEventListener('click', async () => {
     const out = $('#s-test-result');
     readSettingsForm();
     if (keyNeeded() && !draft.apiKey) { out.textContent = keyMissingMessage(); return; }
+    const cfg = settingsSnapshot(draft), ctl = beginSettingsRequest();
+    $('#s-test').disabled = true;
     out.textContent = 'Testing…' + (draft.provider === 'custom' && !keyNeeded() ? ' (a local model can take a minute to load the first time)' : '');
     try {
       // Room for thinking tokens, which count against the cap; at 20 the reply itself could be empty.
-      const { text: reply } = await withTempSettings(() => API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 200, effort: 'low' }));
+      const { text: reply } = await API.chat({ system: 'You are a connectivity test.', user: 'Reply with the single word OK.', maxTokens: 200, effort: 'low', signal: ctl.signal }, cfg);
+      if (!settingsRequestCurrent(ctl)) return;
       out.textContent = 'Connected ✓ (model replied: ' + reply.trim().slice(0, 40) + ')';
     } catch (e) {
+      if (!settingsRequestCurrent(ctl)) return;
       const busy = /^429\b/.test(String(e.message)) && draft.preset === 'openrouter'
         ? ' Free models are shared and get busy; during a brief the app moves on to the other free models by itself, or Fetch list and pick a different ":free" one now.' : '';
       out.textContent = 'Failed: ' + e.message + failureHint(e) + busy;
-    }
+    } finally { if (settingsRequestCurrent(ctl)) cancelSettingsRequest(); }
   });
   $('#settings-save').addEventListener('click', () => {
     readSettingsForm();
