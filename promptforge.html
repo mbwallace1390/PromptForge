@@ -1181,7 +1181,24 @@ function canonicalize(dimId, answer) {
     // Keep the original wording only when it says more than the label does.
     if (hits.length === 1) return { ...answer, choices: [hits[0]], text: wordCount(text) > 4 ? text : '' };
   }
+  if (dimId === 'deliverable') {
+    // "A bulleted list of issues" → our ranked-list chip, so the precise wording (what, why, effort, risk, then wait) survives.
+    const t = text.toLowerCase();
+    let pick = null;
+    if (isReviewOnly()) pick = /report|summary|document|write-?up/.test(t) ? 'A written report I can read later' : /\bfix/.test(t) ? 'Fix the top few straight away, then list the rest' : /list|backlog|rank|priorit|bullet|suggest|recommend/.test(t) ? 'A ranked list of improvements — no code changes yet' : null;
+    else if (isExisting()) pick = /diff|patch|changed parts/.test(t) ? 'Only the changed parts (a patch / diff)' : /step/.test(t) ? 'Step-by-step edits I make myself' : /plan/.test(t) ? 'A plan first, then the changes' : /full|complete|whole|entire|updated file/.test(t) ? 'Full updated files' : null;
+    else { const d = DIM_BY_ID.deliverable.detect(text); pick = d && d.choices ? d.choices[0] : /complete|working code|whole app/.test(t) ? 'Complete, working code' : /plan/.test(t) ? 'A build plan first, then the code' : null; }
+    if (pick) return { ...answer, choices: [pick], text: '', via: undefined }; // a chip now: the canned wording applies
+  }
   return answer;
+}
+/** Dimensions the current mode settles by default; the AI round need not ask about them. */
+function defaultedDim(d) {
+  if (d.id === 'deliverable' && dimStatus('deliverable') === 'missing') {
+    if (isReviewOnly()) return REVIEW_DELIVERABLE;
+    if (beginnerDeliverable()) return BEGINNER_DELIVERABLE;
+  }
+  return '';
 }
 
 /** Store an answer for the current question, then re-run detectors (a chosen type may unlock the platform question). */
@@ -1903,11 +1920,12 @@ function knownSummary() {
     else if (s === 'detected') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])} (inferred from the description${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
     else if (s === 'delegate') lines.push(`- ${dimLabel(d)} (${d.id}): (the person said: let the AI decide)`);
     else if (s === 'skipped') lines.push(`- ${dimLabel(d)} (${d.id}): (the person chose to skip this — do not ask again)`);
+    else if (defaultedDim(d)) lines.push(`- ${dimLabel(d)} (${d.id}): ${defaultedDim(d)} (a default for this kind of request — do not ask about it)`);
   }
   return lines;
 }
 function unknownSummary() {
-  return DIMS.filter((d) => !state.answers[d.id] && !(d.when && !d.when(state))).map((d) => `- ${d.id}: ${dimLabel(d)} — "${dimText(d.question)}"`);
+  return DIMS.filter((d) => !state.answers[d.id] && !(d.when && !d.when(state)) && !defaultedDim(d)).map((d) => `- ${d.id}: ${dimLabel(d)} — "${dimText(d.question)}"`);
 }
 function qaSummary() {
   return state.aiQuestions.filter((q) => q.answer).map((q) => {

@@ -32,12 +32,16 @@ const QUESTIONS_CANON = { questions: [
   { id: 'remember', question: 'Does it need to remember anything between uses?', options: ["No, it's okay if data is lost between uses", 'Yes'], covers: 'data' },
   { id: 'stack', question: 'Any technology preference?', options: ['Not sure — you decide', 'Python'], covers: 'techStack' },
 ] };
+// What a model tends to ask in a review even though the deliverable already has a default.
+const QUESTIONS_REVIEW = { questions: [
+  { id: 'present', question: 'How would you like the findings presented?', options: ['A bulleted list of issues and suggestions', 'A brief executive summary'], covers: 'deliverable' },
+] };
 /** What the "model" says for a given system prompt + user message, and how it stopped. */
 function mockReply(sys, user) {
   if (/connectivity test/i.test(sys)) return { content: 'OK', stop: 'stop' };
   if (/software consultant/i.test(sys)) {
     const round = /round (\d)/.exec(user)?.[1];
-    const qs = /CANON-TEST/.test(user) ? QUESTIONS_CANON : QUESTIONS_ROUND_1;
+    const qs = /CANON-TEST/.test(user) ? QUESTIONS_CANON : /MODE: review/.test(user) ? QUESTIONS_REVIEW : QUESTIONS_ROUND_1;
     return { content: round === '1' ? '```json\n' + JSON.stringify(qs) + '\n```' : JSON.stringify({ questions: [] }), stop: 'stop' };
   }
   return { content: POLISHED, stop: /TRUNCATE-ME/.test(user) ? 'length' : 'stop' }; // 'length' = hit the output cap
@@ -883,9 +887,17 @@ await test('Test 22: review MODE line', async () => {
   await page.fill('#idea', 'Review my existing mobile app and suggest improvements I may not have thought of.');
   await page.click('#start-btn');
   const asked = [];
-  check(await walkUntil(page, /battery cycles be tracked/, asked), 'AI question not reached in review mode');
+  check(await walkUntil(page, /How would you like the findings presented/, asked), 'AI question not reached in review mode');
   const call = mockCalls.find((c) => /software consultant/.test(c.sys));
   check(!!call && /^MODE: review of an existing app/.test(call.user), 'AI question round should be told this is a review: ' + (call ? call.user.slice(0, 60) : 'no call'));
+  // The deliverable has a default in a review: listed as known, not as unknown, so the model need not ask.
+  check(!!call && /What you want back \(deliverable\): A ranked list of improvements, no code changes yet/.test(call.user) && !/^- deliverable:/m.test(call.user), 'review deliverable default should be told to the model as known');
+  // If the model asks anyway, the answer maps onto our chip and the precise wording survives.
+  await page.click('#q-chips .chip >> nth=0'); await page.click('#q-next');
+  await walkUntil(page, /never matches/, asked);
+  await page.waitForSelector('#screen-result:not(.hidden)');
+  const prompt = await promptText(page);
+  check(/## What I want from you\nA ranked list of improvements, no code changes yet\. For each one:/.test(prompt) && !/my answer to/.test(prompt), 'AI-worded deliverable should map onto the ranked-list chip: ' + (/## What I want from you\n[^\n]*/.exec(prompt) || [''])[0]);
   await page.context().close();
 });
 
