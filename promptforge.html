@@ -1625,12 +1625,24 @@ function pinSections(text) {
     const key = headingKey(lines[i]);
     // A filler sub-heading sprinkled under every section ("### Overview") says nothing: drop the line, keep what follows.
     if (/^(overview|summary|details?|description)$/.test(key)) continue;
+    const level = h[1].length;
+    const sectionEnd = () => { let j = i; while (j + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[j + 1]); if (n && n[1].length <= level) break; j++; } return j; };
+    if (/^open (questions|points|issues)/.test(key) && !seen.has(key)) {
+      // Small models pad this section with invented doubts. Delegated items are already covered by the delegate
+      // lines; a review exists because the person has no list; and more than four "doubts" is filler, not doubt.
+      const end = sectionEnd();
+      const body = lines.slice(i + 1, end + 1).filter((l) => !/let the ai decide/i.test(l));
+      const bullets = body.filter((l) => /^\s*(?:[-*•]|\d+[.)])\s/.test(l)).length;
+      seen.add(key);
+      if (!isReviewOnly() && bullets > 0 && bullets <= 4) kept.push(lines[i], ...body);
+      i = end;
+      continue;
+    }
     const pinned = PINNED_HEADINGS.some((re) => re.test(key));
     const duplicate = seen.has(key); // the second "## Look and feel" is a rewrite of the first, not new information
     if (!pinned && !duplicate) { seen.add(key); kept.push(lines[i]); continue; }
     // Drop from this heading up to the next heading of the same or a higher level.
-    const level = h[1].length;
-    while (i + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[i + 1]); if (n && n[1].length <= level) break; i++; }
+    i = sectionEnd();
   }
   const body = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim().replace(/(\n\s*(?:-{3,}|\*{3,}|_{3,})\s*)+$/, '').trim(); // no dangling rule line
   return (body + '\n\n' + section('What I want from you', deliverableBody()) + section("Things I didn't specify", unspecifiedBody()) + section('How to work with me', rulesBody())).trim() + '\n';
@@ -1715,7 +1727,7 @@ Rules:
 - Write in the first person, as the person speaking to the AI that will build the project.
 - Keep every fact, preference and constraint they gave. Do not invent features, integrations or requirements they did not ask for. Where they said "not sure" or "let the AI decide", explicitly hand that decision to the AI and ask it to state its choice.
 - If you add any detail the person did not give — a feature, a data source, a hosting choice, a style, a constraint — append " (suggested)" to it so they can delete it. Never present your own suggestion as their requirement.
-- Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing. Open questions are the person's own uncertainties, written as things they do not know ("I'm not sure whether…") — never questions addressed to the person, and never about anything already settled in the draft's "What I want from you" or "What matters most".
+- Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing. Open questions are the person's own uncertainties, written as things they do not know ("I'm not sure whether…") — never questions addressed to the person, never about anything already settled in the draft's "What I want from you" or "What matters most", at most three, and only when the draft itself shows a real doubt. A review request has none: "surprise me" is the request. Never pad this section.
 - Use Markdown headings ("## Section") for sections, never bold lines, and never add sub-headings such as "Overview" inside a section. Structure: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
 - If the draft is a "Change request" for an app that already exists, use this structure instead: title; what I want changed and why; the existing app (what it is, what it is built with, how you reach the code); what matters most, if present; what should change, numbered; what must stay the same; how I run and test it; then connections, constraints, out of scope, what to deliver, success criteria, open questions.
 - If the draft is a "Review request", keep it a request for suggestions: title; what I want (a review, no changes yet); the existing app; what matters most; known problems, if any; what must stay the same; how I run and test it; what to deliver; open questions. Never write the list of improvements yourself — the AI that receives this prompt will, after reading the code.

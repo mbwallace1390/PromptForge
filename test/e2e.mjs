@@ -445,6 +445,16 @@ await test('Test 8: toList and deriveTitle', async () => {
   check(!/Model copy|Model rule/.test(pinned), "model's bold-line copies of the pinned sections were not stripped");
   check((pinned.match(/How to work with me/g) || []).length === 1 && (pinned.match(/Things I didn't specify/g) || []).length === 1, 'pinned sections should appear exactly once');
   check(/this list wins/.test(pinned), 'the unspecified list should declare precedence');
+  // Open questions: delegated bullets go, a padded list goes, a short real list stays, a review has none.
+  const oq = (body) => page.evaluate((s) => window.PromptForge.pinSections(s), '# T\n\nIntro.\n\n## Open questions\n' + body + '\n## Constraints\nNone.\n');
+  check(/## Open questions\n- Real doubt one\n- Real doubt two\n/.test(await oq('- Real doubt one\n- Real doubt two\n')), 'two genuine open questions should be kept');
+  check(!/Open questions/.test(await oq('- A (let the AI decide)\n- B (let the AI decide)\n')), 'open questions that only delegate should be dropped with the section');
+  check(/## Open questions\n- Real one\n## Constraints/.test((await oq('- Real one\n- Padded (let the AI decide)\n')).replace(/\n\n/g, '\n')), 'delegated bullets should be removed, real ones kept');
+  check(!/Open questions/.test(await oq('- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n')), 'more than four open questions is padding and should be dropped');
+  await page.evaluate(() => { const st = window.PromptForge.state; st.answers.startingPoint = { choices: ['Adding to an existing project (describe below)'], text: '', source: 'user' }; st.answers.changeKind = { choices: ["Review it and suggest improvements — I'm not sure what's needed"], text: '', source: 'user' }; });
+  check(!/Open questions/.test(await oq('- Real doubt one\n')), 'a review request should carry no open questions at all');
+  check(/## Constraints\nNone\./.test(await oq('- Real doubt one\n')), 'the section after the dropped one must survive');
+  await page.evaluate(() => { window.PromptForge.state.answers = {}; });
   await page.context().close();
 });
 
