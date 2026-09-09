@@ -880,7 +880,7 @@ await test('Test 21: review mode', async () => {
   check(/- Don't change any code until I've picked from your list\. Suggest, rank, explain — then wait for me\./.test(prompt), 'review rule missing');
   check(!/Make the requested changes first|For every file you change|Keep the change as small|must-have feature/.test(prompt), 'rules about making changes do not belong in a review');
   check(/- Give me the whole list in one message, most impactful first/.test(prompt), 'review wrap-up rule missing');
-  check(!/I haven't decided on:[^\n]*(what should change|what you want back)/.test(prompt), 'unspecified list should not name the change list or the deliverable in a review');
+  check(!/I haven't decided on:[^\n]*(what should change|what you want back|connections)/.test(prompt), 'unspecified list should not name the change list, the deliverable or connections in a review');
   await page.context().close();
 });
 

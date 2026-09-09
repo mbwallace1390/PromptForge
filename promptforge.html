@@ -1420,7 +1420,7 @@ function unspecifiedDims() {
   return DIMS.filter((d) => {
     if (d.when && !d.when(state)) return false;
     if (['name', 'niceToHave', 'outOfScope', 'successCriteria', 'purpose', 'preserve'].includes(d.id)) return false; // preserve has a stated default
-    if (isReviewOnly() && (d.id === 'coreFeatures' || d.id === 'deliverable')) return false; // a review has no change list, and a default deliverable
+    if (isReviewOnly() && ['coreFeatures', 'deliverable', 'integrations'].includes(d.id)) return false; // a review has no change list, a default deliverable, and discovers the integrations itself
     if (d.id === 'deliverable' && beginnerDeliverable()) return false; // covered by the beginner default
     const s = dimStatus(d.id);
     return s === 'missing' || s === 'skipped';
@@ -1715,7 +1715,7 @@ Rules:
 - Write in the first person, as the person speaking to the AI that will build the project.
 - Keep every fact, preference and constraint they gave. Do not invent features, integrations or requirements they did not ask for. Where they said "not sure" or "let the AI decide", explicitly hand that decision to the AI and ask it to state its choice.
 - If you add any detail the person did not give — a feature, a data source, a hosting choice, a style, a constraint — append " (suggested)" to it so they can delete it. Never present your own suggestion as their requirement.
-- Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing.
+- Turn vague wording into concrete, testable requirements where the intent is clear. Put genuinely open points in a short "Open questions" section rather than guessing. Open questions are the person's own uncertainties, written as things they do not know ("I'm not sure whether…") — never questions addressed to the person, and never about anything already settled in the draft's "What I want from you" or "What matters most".
 - Use Markdown headings ("## Section") for sections, never bold lines, and never add sub-headings such as "Overview" inside a section. Structure: title; one short paragraph saying what it is, why, and who it's for; type and platform (including the starting point); must-have features as a numbered list, each specific enough to verify; nice-to-haves; data and accounts; connections to other services; technology; look and feel; constraints; out of scope; what to deliver; success criteria; open questions. Leave out any section the draft has nothing for — no placeholders like "no specific constraints".
 - If the draft is a "Change request" for an app that already exists, use this structure instead: title; what I want changed and why; the existing app (what it is, what it is built with, how you reach the code); what matters most, if present; what should change, numbered; what must stay the same; how I run and test it; then connections, constraints, out of scope, what to deliver, success criteria, open questions.
 - If the draft is a "Review request", keep it a request for suggestions: title; what I want (a review, no changes yet); the existing app; what matters most; known problems, if any; what must stay the same; how I run and test it; what to deliver; open questions. Never write the list of improvements yourself — the AI that receives this prompt will, after reading the code.
