@@ -1545,17 +1545,24 @@ function unspecifiedBody() {
 function rulesBody() {
   const rules = [];
   const skill = skillBody(); if (skill) rules.push(skill);
+  if (isExisting()) rules.push('Read the existing code before proposing anything, and follow its conventions — naming, structure, libraries — rather than introducing new ones.');
+  if (isReviewOnly()) {
+    // A review changes nothing, so the rules about making changes do not apply.
+    rules.push("Don't change any code until I've picked from your list. Suggest, rank, explain — then wait for me.");
+    rules.push("Before you suggest anything, restate your understanding of this app in a few sentences and list the assumptions you're making.");
+    rules.push('Give me the whole list in one message, most impactful first, and say for each item how sure you are and what you would need to check.');
+    rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
+    return rules.map((r) => `- ${r}`).join('\n');
+  }
   if (isExisting()) {
-    rules.push('Read the existing code before proposing anything, and follow its conventions — naming, structure, libraries — rather than introducing new ones.');
-    if (isReviewOnly()) rules.push("Don't change any code until I've picked from your list. Suggest, rank, explain — then wait for me.");
-    else if (reviewKind() === 'both') rules.push('Make the listed changes. Anything else you would improve is a suggestion for me to approve, not a change to make.');
+    if (reviewKind() === 'both') rules.push('Make the listed changes. Anything else you would improve is a suggestion for me to approve, not a change to make.');
     rules.push("Keep the change as small as the request allows. Touch only what it needs; don't refactor or \"clean up\" unrelated code.");
     rules.push('For every file you change, say what changed and why.');
   }
   rules.push("Before you write any code, restate your understanding of this project in a few sentences and list the assumptions you're making. If something is unclear and would significantly change the outcome, ask me — otherwise make a reasonable choice and tell me what you chose.");
-  if (!isReviewOnly()) rules.push(isExisting() ? 'Make the requested changes first and get them working end to end before touching anything optional.' : 'Build the must-have features first and get them working end to end before touching anything optional.');
+  rules.push(isExisting() ? 'Make the requested changes first and get them working end to end before touching anything optional.' : 'Build the must-have features first and get them working end to end before touching anything optional.');
   rules.push('Keep the code organized and commented so it can be maintained later.');
-  rules.push("When you're done, tell me exactly how to run it and how to test that each must-have feature works.");
+  rules.push(isExisting() ? "When you're done, tell me exactly how to run it and how to check that each change works." : "When you're done, tell me exactly how to run it and how to test that each must-have feature works.");
   rules.push("If anything I've asked for is a bad idea or impractical, say so and suggest a better alternative instead of quietly doing something different.");
   return rules.map((r) => `- ${r}`).join('\n');
 }
@@ -1563,6 +1570,8 @@ function rulesBody() {
 const PINNED_HEADINGS = [
   /^(things i (?:didn'?t|did not|haven'?t|have not) (?:specif|decid)|unspecified|not specified)/,
   /^(how to work with me|working with me|how i (?:want|like|prefer) to work)/,
+  // The deliverable is built from a chip choice, never from free text, so the model's paraphrase only loses precision.
+  /^(what (?:to|i want you to) deliver|what i want from you|deliverables?|what you should deliver)/,
 ];
 /**
  * Small models rewrite "I haven't decided on X" into decisions the person never made, pad the rules
@@ -1600,7 +1609,7 @@ function pinSections(text) {
     while (i + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[i + 1]); if (n && n[1].length <= level) break; i++; }
   }
   const body = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim().replace(/(\n\s*(?:-{3,}|\*{3,}|_{3,})\s*)+$/, '').trim(); // no dangling rule line
-  return (body + '\n\n' + section("Things I didn't specify", unspecifiedBody()) + section('How to work with me', rulesBody())).trim() + '\n';
+  return (body + '\n\n' + section('What I want from you', deliverableBody()) + section("Things I didn't specify", unspecifiedBody()) + section('How to work with me', rulesBody())).trim() + '\n';
 }
 
 /**
@@ -1687,7 +1696,7 @@ Rules:
 - If the draft is a "Change request" for an app that already exists, use this structure instead: title; what I want changed and why; the existing app (what it is, what it is built with, how you reach the code); what matters most, if present; what should change, numbered; what must stay the same; how I run and test it; then connections, constraints, out of scope, what to deliver, success criteria, open questions.
 - If the draft is a "Review request", keep it a request for suggestions: title; what I want (a review, no changes yet); the existing app; what matters most; known problems, if any; what must stay the same; how I run and test it; what to deliver; open questions. Never write the list of improvements yourself — the AI that receives this prompt will, after reading the code.
 - The person is asking; the AI that receives this prompt does the work. Never write plans or promises in the person's voice ("I'll examine the codebase", "Please let me know if you agree").
-- Do not write a "How to work with me" section or a "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Both sections are appended afterwards exactly as the person wrote them.
+- Do not write a "What I want from you", "How to work with me" or "Things I didn't specify" section, and do not turn the draft's "I haven't decided on…" list into decisions. Those three sections are appended afterwards exactly as the person wrote them.
 - Clear, direct, friendly tone. No filler, no marketing language, and no commentary about the prompt itself.
 - Output only the prompt, in Markdown.`;
 

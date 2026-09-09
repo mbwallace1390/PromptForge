@@ -20,7 +20,7 @@ const hanging = new Set(); // responses deliberately never answered (timeout tes
 // specify" and pads the rules. The app must strip both and pin its own versions.
 // It also sprinkles "### Overview" under headings, repeats a section under a near-identical heading, and
 // leaves a dangling rule line — all seen from a 7B model, all to be tidied away.
-const POLISHED = '# Polished prompt\n\n### Overview\nThis is the AI-polished version.\n\n## Must-have features\n### Overview\n1. Log flights\n\n## Look & feel\nClean.\n\n## Look and feel\nDuplicate section.\n\n## Things I didn\'t specify\n- Invented decision: dark mode\n\n## How to work with me\n- Padded rule. I appreciate your guidance.\n\n---\n';
+const POLISHED = '# Polished prompt\n\n### Overview\nThis is the AI-polished version.\n\n## Must-have features\n### Overview\n1. Log flights\n\n## Look & feel\nClean.\n\n## Look and feel\nDuplicate section.\n\n## What to deliver\n- Loosened deliverable.\n\n## Things I didn\'t specify\n- Invented decision: dark mode\n\n## How to work with me\n- Padded rule. I appreciate your guidance.\n\n---\n';
 const QUESTIONS_ROUND_1 = { questions: [
   { id: 'battery_tracking', label: 'Battery tracking', question: 'How should battery cycles be tracked — per battery with a label, or just a total count?', why: 'It changes the data model.', options: ['Per battery with a label', 'Just a total', 'Not sure — you decide'], allowMultiple: false, covers: 'other' },
   { id: 'who', question: 'Roughly how many club members will use it?', options: ['Under 10', '10–50', 'More than 50'], covers: 'users' },
@@ -171,6 +171,10 @@ function checkPinned(page, text, label) {
   check(!/^\s*---\s*$/m.test(text), label + ': dangling rule line kept');
   check(/## Things I didn't specify\nI haven't decided on:/.test(text), label + ': canonical "Things I didn\'t specify" missing');
   check(/## How to work with me\n(- .*\n)*- Before you write any code/.test(text) && text.trim().endsWith('doing something different.'), label + ': canonical rules missing or not last');
+  // The model's deliverable is always dropped; ours appears once, before the unspecified list — or not at all when nothing was chosen.
+  const iDeliver = text.indexOf('## What I want from you'), iUnspec = text.indexOf("## Things I didn't specify");
+  const n = (text.match(/## What I want from you/g) || []).length;
+  check(!/Loosened deliverable/.test(text) && n <= 1 && (n === 0 || iDeliver < iUnspec), label + ': deliverable section should be pinned at most once, before the unspecified list');
 }
 /** In AI mode the built-in essentials come first; Skip through them until the AI round runs and its toast matches `re`. */
 async function skipUntilToast(page, re, maxSteps = 8) {
@@ -866,7 +870,8 @@ await test('Test 21: review mode', async () => {
   check(/## The existing app\n[\s\S]*\*\*The code:\*\* You have the project open in your editor/.test(prompt), 'editor access line missing');
   check(/## What I want from you\nA ranked list of improvements, no code changes yet\./.test(prompt), 'review deliverable missing');
   check(/- Don't change any code until I've picked from your list\. Suggest, rank, explain — then wait for me\./.test(prompt), 'review rule missing');
-  check(!/Make the requested changes first/.test(prompt), 'the make-changes-first rule does not belong in a review');
+  check(!/Make the requested changes first|For every file you change|Keep the change as small|must-have feature/.test(prompt), 'rules about making changes do not belong in a review');
+  check(/- Give me the whole list in one message, most impactful first/.test(prompt), 'review wrap-up rule missing');
   check(!/I haven't decided on:[^\n]*(what should change|what you want back)/.test(prompt), 'unspecified list should not name the change list or the deliverable in a review');
   await page.context().close();
 });
