@@ -1,7 +1,7 @@
 {
   "name": "PromptForge",
   "short_name": "PromptForge",
-  "description": "Turn a rough idea into a build-ready AI prompt.",
+  "description": "Detailed AI prompts for apps, existing-app changes, and product videos.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

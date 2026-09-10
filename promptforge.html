@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
-<title>PromptForge — turn a rough idea into a build-ready AI prompt</title>
-<meta name="description" content="Describe what you want to build in plain words. PromptForge asks the follow-up questions a good consultant would, then writes a detailed prompt you can paste into Claude, ChatGPT, Cursor or any AI coding tool.">
+<title>PromptForge — AI prompts for apps and product videos</title>
+<meta name="description" content="Turn an app idea, an existing-app change, or a product video concept into a detailed AI prompt with guided questions, scene outlines, and optional voiceover scripts.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161a22'/%3E%3Cpath d='M32 10c6 8 12 12 12 22a12 12 0 0 1-24 0c0-5 2-8 4-11 0 5 2 7 4 8 0-9 2-14 4-19z' fill='%23f5a524'/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
@@ -159,11 +159,13 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .two-col { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1.5rem; align-items: start; }
 @media (max-width: 900px) {
-  .two-col { grid-template-columns: 1fr; }
+  .two-col { grid-template-columns: minmax(0, 1fr); }
   .steps .step span.lbl { display: none; }
   .steps .step { padding: .35rem .45rem; }
 }
 @media (max-width: 560px) {
+  .topbar { flex-wrap: wrap; gap: .5rem; }
+  .brand .tag { display: none; }
   .steps { display: none; }
   body { font-size: 15px; }
 }
@@ -196,6 +198,8 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .depth { display: inline-flex; background: var(--bg-3); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
 .depth button { border: 0; background: transparent; padding: .38rem .8rem; border-radius: 999px; font-size: .86rem; font-weight: 600; color: var(--muted); }
 .depth button.on { background: var(--bg-2); color: var(--text); box-shadow: var(--shadow-sm); }
+#mode { flex-wrap: wrap; border-radius: var(--radius-sm); }
+#mode button { border-radius: var(--radius-sm); }
 .recent { max-width: 820px; margin: 2.2rem auto 0; }
 .recent h3 { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: .9rem; text-transform: uppercase; letter-spacing: .06em; }
 .recent-list { display: grid; gap: .5rem; }
@@ -264,7 +268,7 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
   background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--bg-4) 0); position: relative; }
 .ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--bg-2); }
 .ring span { position: relative; }
-.coverage { list-style: none; padding: 0; margin: .9rem 0 0; display: grid; gap: .35rem; }
+.coverage { list-style: none; padding: 0; margin: .9rem 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: .35rem; }
 .coverage li { display: flex; align-items: center; gap: .55rem; font-size: .88rem; padding: .15rem .4rem; border-radius: 6px; }
 .coverage li .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .coverage li .ic { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: .7rem; font-weight: 800; flex: none; }
@@ -342,8 +346,8 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
   <!-- ================= SCREEN 1: DESCRIBE ================= -->
   <section class="screen" id="screen-describe">
     <div class="hero">
-      <h1>Tell me what you want to build — or change.</h1>
-      <p>Write it the way you'd explain it to a friend — messy is fine. I'll ask about anything that's missing, then turn it into a detailed prompt an AI can actually build from.</p>
+      <h1 id="idea-heading">Tell me what you want to create.</h1>
+      <p id="idea-intro">An app, a change, or a product video. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.</p>
     </div>
     <div class="idea-box">
       <label for="idea" class="sr-only">Describe your idea</label>
@@ -353,9 +357,10 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
       </div>
       <div class="idea-foot">
         <div class="controls">
-          <div class="depth" id="mode" role="group" aria-label="New idea or a change to an existing app">
-            <button type="button" data-mode="new" class="on" title="Something that doesn't exist yet">New idea</button>
-            <button type="button" data-mode="existing" title="Add to, fix or upgrade an app you already have">Change an existing app</button>
+          <div class="depth" id="mode" role="group" aria-label="What do you want to create?">
+            <button type="button" data-mode="new" class="on" aria-pressed="true" title="Build a new app, website, game or tool">New app or tool</button>
+            <button type="button" data-mode="existing" aria-pressed="false" title="Add to, fix or upgrade an app you already have">Change an existing app</button>
+            <button type="button" data-mode="video" aria-pressed="false" title="Plan a product video with a prompt, scenes and optional voiceover">Create a video</button>
           </div>
           <div class="depth" id="depth" role="group" aria-label="Interview depth">
             <button type="button" data-depth="quick" class="on" title="Around 6–8 focused questions">Quick</button>
@@ -725,7 +730,11 @@ function typeOf(answers) {
  * Mode = the Starting point answer. When the project already exists, the interview asks about the code,
  * what must keep working and how it is run, and the prompt becomes a change request. One source of truth.
  */
+function isVideo(s = state) { return s.mode === 'video'; }
+function activeDims(s = state) { return isVideo(s) ? VIDEO_DIMS : DIMS; }
+function activeDim(id) { return activeDims().find((d) => d.id === id); }
 function isExisting(s = state) {
+  if (isVideo(s)) return false;
   const a = s.answers.startingPoint;
   if (!a || a.source === 'skipped' || a.source === 'delegate') return false;
   const c = (a.choices || []).join(' ');
@@ -1067,13 +1076,84 @@ const DIMS = [
     },
   },
 ];
-const DIM_BY_ID = Object.fromEntries(DIMS.map((d) => [d.id, d]));
+// Eight questions cover a video brief without sending it through the software interview.
+const VIDEO_DIMS = [
+  {
+    id: 'videoProduct', label: 'Product and main selling point', priority: 'essential', type: 'text', big: true,
+    question: 'What are you promoting, and what is its main selling point?',
+    why: 'Name the product or service and the one real benefit the video should communicate.',
+    placeholder: 'e.g. Our Fold cup: a reusable travel cup that folds flat. Keep the teal colour and white logo.',
+    delegate: 'Use only the product facts in my description. Leave placeholders for the product name, appearance, and main selling point if I have not supplied them; do not invent them.',
+  },
+  {
+    id: 'videoAudience', label: 'Audience', priority: 'essential', type: 'text',
+    question: 'Who should this video speak to?',
+    why: 'The audience guides the opening, language, and situations shown.',
+    placeholder: 'e.g. Commuters who carry a small bag; friendly UK English.',
+    delegate: 'Recommend an audience that fits the supplied product brief, and label it as a suggested audience.',
+  },
+  {
+    id: 'videoPlacement', label: 'Placement and format', priority: 'essential', type: 'single',
+    question: 'Where will the video appear?',
+    why: 'Placement helps choose the frame shape and keep text easy to read.',
+    options: ['Reels / TikTok / Shorts — vertical 9:16', 'YouTube / website — landscape 16:9', 'Social feed — square 1:1', 'Somewhere else (describe below)'],
+    placeholder: 'e.g. Instagram Reels only; leave room for the app buttons and caption.',
+    delegate: 'Recommend a placement and aspect ratio for this audience, and label both as suggestions.',
+  },
+  {
+    id: 'videoLength', label: 'Length', priority: 'essential', type: 'single',
+    question: 'How long should it be?',
+    why: 'A short video needs one clear message and enough time for the final action.',
+    options: ['15 seconds', '30 seconds', '60 seconds', 'Another length (describe below)'],
+    placeholder: 'e.g. 20 seconds.',
+    delegate: 'Choose a short duration that gives the product, main selling point, and call to action enough time; state the proposed length.',
+  },
+  {
+    id: 'videoStyle', label: 'Visual style', priority: 'important', type: 'multi',
+    question: 'What should it look and feel like?',
+    why: 'Choose the mood and visual approach; describe any must-keep brand details below.',
+    options: ['Clean product showcase', 'Everyday demonstration', 'Cinematic', 'Playful and energetic', 'Calm and minimal', 'Animation'],
+    placeholder: 'e.g. Warm daylight, close-ups, gentle movement; no people and no flashing cuts.',
+    delegate: 'Choose a simple visual style suited to the product and audience; explain it as a creative suggestion.',
+  },
+  {
+    id: 'videoAssets', label: 'Available photos and brand assets', priority: 'important', type: 'single',
+    question: 'What product photos, clips, logos, or brand references can you provide?',
+    why: 'References help keep the product recognisable. Describe them here; attach them later in your chosen video tool.',
+    options: ['I have product photos', 'I have photos, clips, or brand assets', 'I have no assets yet'],
+    placeholder: 'e.g. Front and side photos, a white logo, and our blue packaging. This form does not upload files.',
+    delegate: 'Suggest which product photos or brand references would help. Treat them as needed references, not as files already supplied.',
+  },
+  {
+    id: 'videoVoiceover', label: 'Voiceover', priority: 'important', type: 'single',
+    question: 'Do you want a voiceover?',
+    why: 'A video can tell its story through spoken words, on-screen text, or visuals alone.',
+    options: ['Yes — write a voiceover script', 'No voiceover — visuals and on-screen text only'],
+    placeholder: 'e.g. Warm, conversational voice in UK English; no music.',
+    detect(text) {
+      if (videoVoiceoverRefused(text)) return { choices: ['No voiceover — visuals and on-screen text only'], text, note: 'from your description' };
+      if (/\b(?:include|add|with|want|use|needs?)\s+(?:(?:a|an|some)\s+)?(?:voice[ -]?over|narration|narrator)\b/i.test(text)) return { choices: ['Yes — write a voiceover script'], text, note: 'from your description' };
+      return null;
+    },
+    delegate: 'Recommend whether a voiceover would help. Keep any proposed narration optional until that choice is settled.',
+  },
+  {
+    id: 'videoCTA', label: 'Call to action', priority: 'important', type: 'single',
+    question: 'What should viewers do next?',
+    why: 'End with one clear action and any exact wording or destination you want shown.',
+    options: ['Shop now', 'Visit the website', 'Learn more', 'Get in touch', 'No call to action', 'Something else (describe below)'],
+    placeholder: 'e.g. See the range at example.com. Do not mention a sale.',
+    delegate: 'Suggest one simple call to action that fits the brief. Leave the destination as a placeholder unless I supplied it; do not invent an offer or discount.',
+  },
+];
+const DIM_BY_ID = Object.fromEntries([...DIMS, ...VIDEO_DIMS].map((d) => [d.id, d]));
 const PRIORITY_WEIGHT = { essential: 3, important: 2, optional: 1 };
 const QUICK_LIMIT = 8;
 
 /* ---------- 4. State & interview engine ---------- */
 const state = {
   id: null,
+  mode: 'software',   // Video has its own bank; software startingPoint still selects new/existing.
   screen: 'describe',
   description: '',
   depth: settings.depth || 'quick',
@@ -1091,7 +1171,7 @@ const state = {
 
 function resetState() {
   Object.assign(state, {
-    id: uid(), screen: 'describe', description: '', answers: {}, extraQA: [], asked: [], current: null,
+    id: uid(), mode: 'software', screen: 'describe', description: '', answers: {}, extraQA: [], asked: [], current: null,
     aiQuestions: [], aiRound: 0, aiMode: false, aiDone: false, single: false,
     prompt: { structured: '', polished: '', view: 'structured', edited: false },
   });
@@ -1121,7 +1201,7 @@ function dimStatus(id) {
 /** Run every detector that can run right now against the description (never overwrites user answers). */
 function runDetection() {
   const text = state.description;
-  for (const d of DIMS) {
+  for (const d of activeDims()) {
     if (state.answers[d.id] && state.answers[d.id].source !== 'detected') continue;
     if (d.when && !d.when(state)) { if (state.answers[d.id] && state.answers[d.id].source === 'detected') delete state.answers[d.id]; continue; }
     if (!d.detect) continue;
@@ -1145,7 +1225,7 @@ function detectHint(d) {
 /** Dimensions still worth asking, in priority order, respecting depth. */
 function pendingDims() {
   const order = { essential: 0, important: 1, optional: 2 };
-  let list = DIMS.filter((d) => {
+  let list = activeDims().filter((d) => {
     if (state.asked.includes(d.id)) return false;
     if (state.answers[d.id] && state.answers[d.id].source !== 'skipped' && hasContent(state.answers[d.id]) && !isUnconfirmed(state.answers[d.id]) && !state.answers[d.id].needsConfirmation) return false;
     if (state.answers[d.id] && state.answers[d.id].source === 'skipped') return false;
@@ -1154,7 +1234,7 @@ function pendingDims() {
   }).sort((a, b) => order[dimText(a.priority)] - order[dimText(b.priority)]);
   if (state.depth === 'quick' && !state.single) {
     list = list.filter((d) => dimText(d.priority) !== 'optional');
-    const askedDims = state.asked.filter((id) => DIM_BY_ID[id]).length;
+    const askedDims = state.asked.filter((id) => activeDim(id)).length;
     list = list.slice(0, Math.max(0, QUICK_LIMIT - askedDims));
   }
   return list;
@@ -1175,7 +1255,7 @@ function nextQuestionId() {
   return p.length ? p[0].id : null;
 }
 function questionById(id) {
-  if (DIM_BY_ID[id]) {
+  if (activeDim(id)) {
     const d = DIM_BY_ID[id]; // wording can depend on the mode; resolve it once here
     return { kind: 'dim', ...d, label: dimLabel(d), question: dimText(d.question), why: dimText(d.why), placeholder: dimText(d.placeholder), hint: dimText(d.hint), delegate: dimText(d.delegate) };
   }
@@ -1239,7 +1319,7 @@ function commitAnswer(id, answer) {
     const aq = state.aiQuestions.find((x) => x.id === id);
     aq.answer = answer;
     // Map the answer onto a dimension when the AI told us which one it covers.
-    if (aq.covers && DIM_BY_ID[aq.covers]) {
+    if (aq.covers && activeDim(aq.covers)) {
       if (answer.source === 'skipped') {
         const mapped = state.answers[aq.covers];
         // Back then Skip withdraws this answer, but must not erase a different question's answer.
@@ -1257,6 +1337,7 @@ function commitAnswer(id, answer) {
   }
   if (!state.asked.includes(id)) state.asked.push(id);
   runDetection();
+  if (isVideo()) return; // Video answers cannot change software platforms or deliverables.
   if (typeOf(state.answers) !== previousType) {
     // Platforms belong to the chosen type; a previous Android answer cannot describe a desktop app.
     delete state.answers.platform;
@@ -1279,7 +1360,7 @@ function commitAnswer(id, answer) {
 /** Brief strength: weighted coverage of the dimensions (delegating counts as partial credit). */
 function strength() {
   let got = 0, total = 0;
-  for (const d of DIMS) {
+  for (const d of activeDims()) {
     if (d.when && !d.when(state) && !state.answers[d.id]) continue; // not applicable
     const w = PRIORITY_WEIGHT[dimText(d.priority)];
     total += w;
@@ -1370,6 +1451,7 @@ const BEGINNER_DELIVERABLE = "I'm new to this, so give me the simplest thing tha
 const isBeginner = () => !delegated('skillLevel') && has(val('skillLevel'), BEGINNER_RE);
 const beginnerDeliverable = () => isBeginner() && dimStatus('deliverable') === 'missing';
 function deliverableBody() {
+  if (isVideo()) return videoDeliverableBody();
   if (delegated('deliverable')) return delegateLine('deliverable');
   const t = val('deliverable');
   const alsoReview = reviewKind() === 'both' ? " After that, list any other improvements you'd make, ranked by impact — as suggestions, not changes." : '';
@@ -1572,7 +1654,104 @@ function buildChangeRequest() {
   return out.trim() + '\n';
 }
 
+/** Share explicit refusal detection between the description detector and saved answers. */
+function videoVoiceoverRefused(text) {
+  return /\b(?:no|without|omit|skip)\s+(?:(?:a|an|any)\s+)?(?:voice[ -]?over|narration|narrator|spoken (?:words|audio|dialogue))\b|\b(?:music|visuals|text) only\b|\b(?:do not|don't) (?:include|add|use|want|need) (?:(?:a|an|any) )?(?:voice[ -]?over|narration|narrator)\b|\b(?:voice[ -]?over|narration)\s*(?::|is|=|-)?\s*(?:off|no|disabled|none)\b/i.test(String(text).replace(/’/g, "'"));
+}
+
+/** Spoken audio is opt-in; a skipped answer or a written refusal overrides a selected Yes chip. */
+function videoVoiceoverRequested() {
+  if (['missing', 'skipped', 'delegate'].includes(dimStatus('videoVoiceover'))) return false;
+  const text = val('videoVoiceover');
+  if (videoVoiceoverRefused(text) || /^\s*(?:no|nope|off|none)[.!]?\s*$/i.test(state.answers.videoVoiceover.text || '')) return false;
+  return /\byes\b|\b(?:voice[ -]?over|narration|narrator|spoken (?:words|audio))\b/i.test(text);
+}
+
+function videoDeliverableBody() {
+  const voice = videoVoiceoverRequested()
+    ? 'Include a separate voiceover script, with each line matched to a scene and short enough for the requested duration.'
+    : delegated('videoVoiceover')
+      ? 'Recommend whether a voiceover would help; keep any proposed narration clearly optional.'
+      : 'Use no voiceover and omit the voiceover script. Communicate through visuals and the requested on-screen text.';
+  return 'Give me a ready-to-copy video-generation prompt and a scene outline with timing, visuals, and on-screen text. ' + voice + ' Keep placeholders clearly marked wherever a product fact or asset is missing.';
+}
+
+function videoUnspecifiedBody() {
+  const open = VIDEO_DIMS.filter((d) => ['missing', 'skipped'].includes(dimStatus(d.id)));
+  if (!open.length) return '';
+  return `I have not specified: ${open.map((d) => d.label.toLowerCase()).join(', ')}. Treat these as open even if another section suggests a possible answer. Make simple creative suggestions and label them as suggestions. Use placeholders for missing product facts, selling points, brand details, and destinations. An unanswered or skipped voiceover means no spoken narration.`;
+}
+
+function videoRulesBody() {
+  const rules = [
+    'Use only supplied product facts. Do not invent claims, specifications, benefits, prices, discounts, testimonials, certifications, or guarantees.',
+    'Keep the same product, packaging, logo, colours, and other supplied brand details consistent in every scene. Do not invent missing branding or change the product to suit a shot.',
+    'Photos, clips, and logos described in this brief have not been uploaded here. Refer to them by the names I supplied; ask for them in the chosen video tool before relying on details you cannot see.',
+    'Use plain-language visual and motion directions. Do not presume model-specific parameters, reference-image support, sound generation, or other capabilities of a particular video tool.',
+    'Preserve the meaning of my wording and restrictions. Label creative suggestions and use clear placeholders for missing facts instead of guessing.',
+    'Keep text legible for the selected placement, allow room for platform controls, and make scene timings add up to the chosen duration.',
+  ];
+  rules.push(videoVoiceoverRequested()
+    ? 'Use the requested voiceover language and tone. Narration must use only supplied facts, match the scenes, and fit the duration; do not add dialogue or claims beyond the brief.'
+    : delegated('videoVoiceover')
+      ? 'The voiceover decision is delegated: explain your recommendation and keep any proposed spoken audio optional.'
+      : 'No voiceover or spoken dialogue. An unanswered, skipped, or disabled voiceover must stay off.');
+  rules.push('If a request is impractical for the chosen video tool, explain the limitation and suggest a simple alternative before changing the brief.');
+  return rules.map((r) => `- ${r}`).join('\n');
+}
+
+/** Built-in video output is a usable prompt and draft outline, including when no AI provider is configured. */
+function buildVideoPrompt() {
+  const quote = (text) => String(text).split(/\r?\n/).map((line) => `> ${line}`).join('\n');
+  const detail = (id, placeholder) => {
+    if (delegated(id)) return VIDEO_DIMS.find((d) => d.id === id).delegate;
+    if (['missing', 'skipped'].includes(dimStatus(id))) return placeholder;
+    return quote(val(id));
+  };
+  const brief = [
+    'Create a product video using the brief and scene outline below. Keep the product accurate, make one supported main selling point clear, and respect the requested ending.',
+    '**Original idea (my words):**\n' + quote(state.description.trim()),
+    ...VIDEO_DIMS.map((d) => `**${d.label}:**\n${detail(d.id, `[${d.label.toLowerCase()} — not specified]`)}`),
+    'References described above are not attached or uploaded by this form. Supply them separately to the video tool before generating shots that depend on them.',
+  ];
+  let out = '# Video request\n\n' + section('Video-generation prompt', brief.join('\n\n'));
+
+  // Only an unambiguous duration gets exact timings; open or qualified lengths retain editable ranges.
+  const lengthAnswer = state.answers.videoLength;
+  const lengthText = lengthAnswer && !['missing', 'skipped', 'delegate'].includes(dimStatus('videoLength'))
+    ? (lengthAnswer.text || (lengthAnswer.choices || []).join(' ')).trim() : '';
+  const duration = /^(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m)\s*[.!]?$/i.exec(lengthText);
+  const seconds = duration ? Number(duration[1]) * (/^m/i.test(duration[2]) ? 60 : 1) : 0;
+  const mark = (fraction) => Number((seconds * fraction).toFixed(2));
+  const times = seconds > 0 && Number.isFinite(seconds)
+    ? [`0–${mark(0.2)} s`, `${mark(0.2)}–${mark(0.8)} s`, `${mark(0.8)}–${mark(1)} s`]
+    : ['[opening 20% of the chosen duration]', '[middle 60% of the chosen duration]', '[final 20% of the chosen duration]'];
+  const noCTA = !delegated('videoCTA') && /^no call to action(?:$|\s*[—.])/i.test(val('videoCTA'));
+  const scenes = [
+    `### 1. Opening / hook — ${times[0]}\nVisual: Introduce [product name and appearance from the supplied brief] in a simple shot that fits the chosen style. Use an available reference photo when supplied.\nOn-screen text: [short product name or factual hook from the brief].`,
+    `### 2. Product and main selling point — ${times[1]}\nVisual: Show one clear detail or demonstration that supports [main selling point supplied by me]. Keep the same product and brand details as the opening. Do not demonstrate an unverified capability.\nOn-screen text: [one short, supported selling point from the product brief].`,
+    `### 3. ${noCTA ? 'Closing product shot' : 'Call to action'} — ${times[2]}\nVisual: Finish on a clear view of the same product, with the supplied brand reference if available.\nOn-screen text: ${noCTA ? 'No call to action; keep the ending focused on the product.' : '\n' + detail('videoCTA', '[desired action and destination — not specified]')}`,
+    'The bracketed text is an editable template. Replace it only with facts from the brief or supplied references. Adapt shot choices to the requested style and available assets, and keep every stated restriction.',
+  ];
+  out += section('Scene outline', scenes.join('\n\n'));
+  if (videoVoiceoverRequested()) {
+    out += section('Voiceover script', [
+      'Draft narration template — replace the brackets with supplied facts and keep the wording brief enough for each scene.',
+      '1. Opening: "Meet [product name supplied by me]."',
+      '2. Main message: "[One supported main selling point from the product brief, in natural spoken wording]."',
+      noCTA ? '3. Closing: [pause; no spoken call to action].' : '3. Closing:\n' + detail('videoCTA', '"[call to action supplied by me]."'),
+      '**Voice direction (my words):**\n' + quote(val('videoVoiceover')),
+    ].join('\n\n'));
+  }
+  if (state.extraQA.length) out += section('Additional details', state.extraQA.map((x) => `**${x.q}**\n${quote(x.a)}`).join('\n\n'));
+  out += section('What I want from you', videoDeliverableBody());
+  out += section("Things I didn't specify", videoUnspecifiedBody());
+  out += section('How to work with me', videoRulesBody());
+  return out.trim() + '\n';
+}
+
 function buildStructuredPrompt() {
+  if (isVideo()) return buildVideoPrompt();
   if (isExisting()) return buildChangeRequest();
   const title = deriveTitle();
   let out = `# Build request: ${title}\n\n`;
@@ -1620,10 +1799,12 @@ function buildStructuredPrompt() {
 }
 /** The two sections that make or break the prompt. Written by us, and pinned back onto any AI rewrite. */
 function unspecifiedBody() {
+  if (isVideo()) return videoUnspecifiedBody();
   const unspec = unspecifiedDims();
   return unspec.length ? `I haven't decided on: ${unspec.map((d) => dimLabel(d).toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result. If anything above seems to settle one of these, treat it as open anyway; this list wins.` : '';
 }
 function rulesBody() {
+  if (isVideo()) return videoRulesBody();
   const rules = [];
   const skill = skillBody(); if (skill) rules.push(skill);
   if (isExisting()) rules.push('Read the existing code before proposing anything, and follow its conventions — naming, structure, libraries — rather than introducing new ones.');
@@ -1687,6 +1868,11 @@ function pinSections(text) {
     if (/^(overview|summary|details?|description)$/.test(key)) continue;
     const level = h[1].length;
     const sectionEnd = () => { let j = i; while (j + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[j + 1]); if (n && n[1].length <= level) break; j++; } return j; };
+    // The saved audio choice also governs AI output; a rewrite cannot opt the person into narration.
+    if (isVideo() && !videoVoiceoverRequested() && /^(?:(?:optional|suggested)\s+)?(?:voice[ -]?over|narration|spoken (?:audio|script))(?:\b|$)/.test(key)) {
+      i = sectionEnd();
+      continue;
+    }
     if (/^open (questions|points|issues)/.test(key) && !seen.has(key)) {
       // Small models pad this section with invented doubts. Delegated items are already covered by the delegate
       // lines; a review exists because the person has no list; and more than three "doubts" is filler, not doubt.
@@ -1726,6 +1912,7 @@ const LOOKS_UP_RE = /\b(look(?:s|ed)? ?up|lookup|search(?:es)?|find(?:s)?|see(?:
 // Entering records is itself a source ("add a flight"); typing a query is not ("type a book title"), so bare "type" is out.
 const HAS_SOURCE_RE = /\b(add(?:s|ing)?|enter(?:s|ing)?|type in|creat(?:e|es|ing)|record(?:s|ing)?|log(?:s|ging)?|import(?:s|ed|ing)?|upload(?:s|ed|ing)?|fetch(?:es|ed|ing)?|pull(?:s|ed|ing)?|sync(?:s|ed|ing)?|scan(?:s|ned|ning)?|api|database|spreadsheet|csv|json|xml|file|paste[ds]?|manual(?:ly)? (?:input|entry|entered)|(?:from|via) (?:a|an|the)? ?(?:website|service|site|catalog(?:ue)?|library system|internet|open library|google books|goodreads|wikipedia))\b/i;
 function sanityHints() {
+  if (isVideo()) return [];
   const hints = [];
   if (isExisting()) {
     // The from-scratch data questions do not apply; the one thing that sinks a change request is the AI not seeing the code.
@@ -1767,6 +1954,21 @@ Guidelines:
 
 Return ONLY JSON, no prose, exactly in this shape:
 {"questions":[{"id":"short_snake_case","label":"2-3 word topic","question":"…","why":"one short sentence on why this matters","options":["…"],"allowMultiple":false,"covers":"dimension_id or other"}]}`;
+
+const VIDEO_QUESTION_SYSTEM = `You help someone plan a product video. Find the missing details needed for a useful video-generation prompt, scene outline and optional voiceover script.
+
+Ask only about unknown details that change the video: product and supported selling point, audience, placement and format, length, visual style, available reference assets, voiceover, and call to action. Respect skipped answers and decisions delegated to the AI. Never invent product claims or assume photos or logos have been uploaded. This is a video brief, so do not ask about software development, code, frameworks, hosting or databases.
+
+Use plain language, one topic per question, and 2–5 short options where helpful. Do not re-ask known answers. "covers" must be a video dimension id from STILL UNKNOWN, or "other" for an additional video detail. Return an empty list if the brief is sufficient.
+
+Return ONLY JSON in this shape:
+{"questions":[{"id":"short_snake_case","label":"2-3 word topic","question":"…","why":"one short sentence","options":["…"],"allowMultiple":false,"covers":"video dimension id or other"}]}`;
+
+const VIDEO_POLISH_SYSTEM = `Rewrite a person's product video brief as a ready-to-use prompt for a video tool or creative assistant. Keep their exact product facts, audience, placement, duration, visual style, available assets, voiceover decision and call to action.
+
+Use Markdown headings: title, Video-generation prompt, Scene outline, and Voiceover script only if the draft explicitly includes it. Make the scene outline practical with visuals, on-screen text and timing that fits the requested length. Preserve all limits and user wording that carries facts. Proposed creative choices must be labeled "(suggested)". Missing product names, claims, links, brand details and reference images must stay explicit placeholders; never invent them or claim assets were uploaded. Respect a no-voiceover answer, including text such as "no narration" even if a Yes option was chosen. Do not include a narration script when voiceover was skipped, undecided or delegated.
+
+You are preparing text, not rendering a video. Do not claim to have created footage or prescribe unsupported model parameters. Do not add software-building sections. Do not write "What I want from you", "Things I didn't specify", or "How to work with me": those sections are restored from the person's choices afterwards. Output only the prompt, with no commentary.`;
 
 // The shape QUESTION_SYSTEM asks for, enforced by the API (structured outputs / response_format) so a
 // stray sentence or a code fence can never turn a good question round into a fallback to built-in mode.
@@ -2010,7 +2212,7 @@ function shortLabel(q) { return String(q).replace(/[?.!]/g, '').split(/\s+/).sli
 
 function knownSummary() {
   const lines = [];
-  for (const d of DIMS) {
+  for (const d of activeDims()) {
     const s = dimStatus(d.id);
     if (s === 'answered') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])}`);
     else if (s === 'detected') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])} (${state.answers[d.id].assumed ? 'assumed by default' : 'inferred from the description'}${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
@@ -2021,7 +2223,7 @@ function knownSummary() {
   return lines;
 }
 function unknownSummary() {
-  return DIMS.filter((d) => !state.answers[d.id] && !(d.when && !d.when(state)) && !defaultedDim(d)).map((d) => `- ${d.id}: ${dimLabel(d)} — "${dimText(d.question)}"`);
+  return activeDims().filter((d) => !state.answers[d.id] && !(d.when && !d.when(state)) && !defaultedDim(d)).map((d) => `- ${d.id}: ${dimLabel(d)} — "${dimText(d.question)}"`);
 }
 function qaSummary() {
   return state.aiQuestions.filter((q) => q.answer).map((q) => {
@@ -2033,28 +2235,30 @@ function qaSummary() {
 async function aiFetchQuestions() {
   const perRound = state.depth === 'quick' ? 3 : 5; // the built-in essentials already took a few slots in quick mode
   const sees = aiSeesCode() ? ' The AI that receives the prompt will have the project open, so do not ask what the app is or what it is built with.' : '';
-  const mode = isReviewOnly() ? `MODE: review of an existing app — the person wants suggestions, not a build. Ask what matters most to them, what they already know is wrong, what is off-limits, and how they want the findings. Do not propose improvements yourself.${sees}\n\n`
+  const mode = isVideo() ? 'MODE: product video — prepare a video prompt, scene outline and optional voiceover script.\n\n'
+    : isReviewOnly() ? `MODE: review of an existing app — the person wants suggestions, not a build. Ask what matters most to them, what they already know is wrong, what is off-limits, and how they want the findings. Do not propose improvements yourself.${sees}\n\n`
     : isExisting() ? `MODE: change to an existing app — ask about the existing code, what must keep working, and how it is run and tested; never about building it from scratch.${sees}\n\n` : '';
   const user = `${mode}PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
   // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
   // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
-  const { text: raw, truncated } = await API.chat({ system: QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low', schema: QUESTION_SCHEMA });
+  const { text: raw, truncated } = await API.chat({ system: isVideo() ? VIDEO_QUESTION_SYSTEM : QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low', schema: QUESTION_SCHEMA });
   if (truncated) throw new Error('the question list was cut off at the token limit');
   const j = extractJSON(raw);
   const qs = Array.isArray(j.questions) ? j.questions : [];
-  return qs.filter((q) => q && q.question).slice(0, 6).map((q, i) => ({
+  // Drop questions mapped to the other workflow; treating them as "other" would still ask them.
+  return qs.filter((q) => q && q.question && (!DIM_BY_ID[q.covers] || activeDim(q.covers))).slice(0, isVideo() ? perRound : 6).map((q, i) => ({
     id: `ai_${state.aiRound + 1}_${i + 1}`,
     question: String(q.question).trim(),
     why: q.why ? String(q.why).trim() : '',
     options: Array.isArray(q.options) ? q.options.map((o) => String(o).trim()).filter(Boolean).slice(0, 6) : [],
     allowMultiple: !!q.allowMultiple,
-    covers: DIM_BY_ID[q.covers] ? q.covers : 'other',
-    label: q.label ? String(q.label).trim() : (DIM_BY_ID[q.covers] ? dimLabel(DIM_BY_ID[q.covers]) : shortLabel(q.question)),
+    covers: activeDim(q.covers) ? q.covers : 'other',
+    label: q.label ? String(q.label).trim() : (activeDim(q.covers) ? dimLabel(DIM_BY_ID[q.covers]) : shortLabel(q.question)),
   }));
 }
 function polishUserMessage() {
   const lines = [];
-  for (const d of DIMS) {
+  for (const d of activeDims()) {
     const s = dimStatus(d.id);
     if (s === 'answered' || s === 'detected') lines.push(`${dimLabel(d)}: ${answerText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
     else if (s === 'delegate') lines.push(`${dimLabel(d)}: let the AI decide`);
@@ -2094,7 +2298,7 @@ function renderBrief() {
   const desc = state.description.trim();
   $('#brief-desc').textContent = desc.length > 360 ? desc.slice(0, 357) + '…' : desc;
   const items = [];
-  for (const d of DIMS) {
+  for (const d of activeDims()) {
     const a = state.answers[d.id]; if (!a) continue;
     const s = dimStatus(d.id); if (s === 'missing') continue;
     let v = '', cls = '';
@@ -2206,7 +2410,7 @@ function onDelegate() { commitAnswer(state.current, { choices: [], text: '', sou
 /** Back/Next history follows only questions that still apply after an earlier answer changes. */
 function questionApplies(id) {
   const d = DIM_BY_ID[id] || DIM_BY_ID[(state.aiQuestions.find((q) => q.id === id) || {}).covers];
-  return !d || !d.when || d.when(state);
+  return !d || (!!activeDim(d.id) && (!d.when || d.when(state)));
 }
 function onBack() {
   const i = state.asked.indexOf(state.current);
@@ -2232,16 +2436,17 @@ async function startInterview() {
   const text = $('#idea').value.trim();
   if (wordCount(text) < 3) { toast('Give me at least a sentence to work with'); $('#idea').focus(); return; }
   resetState();
+  state.mode = $('#mode button.on')?.dataset.mode === 'video' ? 'video' : 'software';
   state.description = text;
   state.depth = settings.depth || 'quick';
   state.aiMode = aiEnabled();
   runDetection();
   // The switch on the first screen sets the starting point unless the description already made it clear.
   const wantsExisting = !!$('#mode button.on') && $('#mode button.on').dataset.mode === 'existing';
-  if (wantsExisting && !isExisting()) {
+  if (!isVideo() && wantsExisting && !isExisting()) {
     state.answers.startingPoint = { choices: ['Adding to an existing project (describe below)'], text: '', source: 'user' };
     runDetection(); // detectors that depend on the mode (code access) can run now
-  } else if (!wantsExisting && isExisting()) {
+  } else if (!isVideo() && !wantsExisting && isExisting()) {
     toast('Sounds like a change to an existing app — asking the questions for that. Not right? Change the Starting point answer in the brief.', '', 6000);
   }
   showScreen('refine');
@@ -2298,7 +2503,7 @@ function renderResult() {
   const notice = $('#result-notice');
   if (!aiEnabled()) { notice.className = 'notice'; notice.innerHTML = 'Built-in mode. Add a free service (OpenRouter, Groq, Google AI Studio), a Claude or OpenAI key, or a model on this computer in <button class="btn sm ghost" type="button" data-open-settings style="display:inline-flex;padding:.1rem .5rem">Settings ⚙</button> for questions tailored to your project and an AI-polished final prompt.'; }
   else if (p.view === 'polished' && p.polished && p.truncated) { notice.className = 'notice warn'; notice.textContent = "The AI-polished prompt hit the model's output limit and may be cut off at the end. Check it, or polish again."; }
-  else if (p.view === 'polished' && p.polished) { notice.className = 'notice'; notice.textContent = "AI rewrite. Anything marked (suggested) is the AI's idea, not yours — delete what you don't want. The Structured tab holds only what you said."; }
+  else if (p.view === 'polished' && p.polished) { notice.className = 'notice'; notice.textContent = isVideo() ? 'AI rewrite. Check any suggested scenes or wording against your product facts. The Structured tab keeps your answers and the built-in scene template.' : "AI rewrite. Anything marked (suggested) is the AI's idea, not yours — delete what you don't want. The Structured tab holds only what you said."; }
   else notice.className = 'notice hidden';
 
   const hints = sanityHints();
@@ -2309,7 +2514,7 @@ function renderResult() {
   const s = strength();
   $('#ring').style.setProperty('--p', s.pct); $('#ring-pct').textContent = s.pct + '%'; $('#ring-label').textContent = s.label;
   const cov = [];
-  for (const d of DIMS) {
+  for (const d of activeDims()) {
     if (d.when && !d.when(state) && !state.answers[d.id]) continue;
     const st = dimStatus(d.id);
     const guess = st === 'detected' && isUnconfirmed(state.answers[d.id]);
@@ -2365,7 +2570,7 @@ async function polish() {
     if (!frame) frame = requestAnimationFrame(paint); // one repaint per frame, however fast tokens land
   };
   try {
-    const { text: raw, truncated } = await API.chat({ system: POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000, onDelta, signal: ctl.signal });
+    const { text: raw, truncated } = await API.chat({ system: isVideo() ? VIDEO_POLISH_SYSTEM : POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000, onDelta, signal: ctl.signal });
     if (ctl.signal.aborted) return;
     if (!raw.trim()) throw new Error('empty response');
     state.prompt.polished = pinSections(cleanMarkdown(raw));
@@ -2437,7 +2642,7 @@ function saveHistory() {
   if (!state.id) state.id = uid();
   const list = readHistory();
   const entry = {
-    id: state.id, ts: Date.now(), title: currentTitle(), description: state.description, answers: state.answers, extraQA: state.extraQA,
+    id: state.id, ts: Date.now(), mode: state.mode, title: currentTitle(), description: state.description, answers: state.answers, extraQA: state.extraQA,
     asked: state.asked, aiQuestions: state.aiQuestions, prompt: state.prompt, strength: strength().pct, depth: state.depth,
   };
   const i = list.findIndex((x) => x.id === state.id);
@@ -2450,7 +2655,7 @@ function loadHistory(id) {
   cancelPolish();
   resetState();
   Object.assign(state, {
-    id: e.id, description: e.description || '', answers: e.answers || {}, extraQA: e.extraQA || [], asked: e.asked || [], aiQuestions: e.aiQuestions || [],
+    id: e.id, mode: e.mode === 'video' ? 'video' : 'software', description: e.description || '', answers: e.answers || {}, extraQA: e.extraQA || [], asked: e.asked || [], aiQuestions: e.aiQuestions || [],
     depth: e.depth || 'quick', prompt: Object.assign({ structured: '', polished: '', view: 'structured', edited: false }, e.prompt || {}),
   });
   if (!state.prompt.structured) state.prompt.structured = buildStructuredPrompt();
@@ -2568,17 +2773,35 @@ const EXAMPLES = [
   "Add CSV export to my existing Android app. It's Kotlin with Room, and the code is on GitHub.",
   'Review my existing Expo app, open in Claude Code, and suggest improvements I may not have thought of.',
 ];
+const VIDEO_EXAMPLES = [
+  'A 15-second Instagram Reel for my handmade ceramic mugs. Show the glaze and handle details, with a warm, relaxed feel and a link to my shop.',
+  'A product demo for my foldable phone stand aimed at people working from home. I have product photos and want on-screen text with no voiceover.',
+  'A short launch video for my gardening app, showing its planting reminders using screen recordings I can provide.',
+];
+function renderIdeaMode() {
+  const selected = $('#mode button.on')?.dataset.mode || 'new';
+  const video = selected === 'video', existing = selected === 'existing';
+  $$('#mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === selected)));
+  $('#idea-heading').textContent = video ? 'Tell me about the video you want.' : existing ? 'Tell me what you want to change.' : 'Tell me what you want to create.';
+  $('#idea-intro').textContent = video
+    ? "Describe the product and your idea — I'll help shape a video prompt, a scene outline, and an optional voiceover script. You'll use the finished brief in your video tool."
+    : existing ? "Describe the app and what you'd like to improve — I'll ask about the details and turn it into a clear request for your AI coding tool."
+      : "An app, a change, or a product video. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.";
+  $('#idea').placeholder = video ? VIDEO_EXAMPLES[0] : existing ? EXAMPLES[3] : EXAMPLES[0];
+  const examples = video ? VIDEO_EXAMPLES : existing ? EXAMPLES.slice(3) : EXAMPLES;
+  $('#examples').innerHTML = '<span>Try an example:</span>' + examples.map((e) => `<button type="button" class="chip example" data-ex="${esc(e)}">${esc(e.split(' ').slice(0, 7).join(' '))}…</button>`).join('');
+}
 function init() {
   refreshAiBadge();
   renderRecent();
-  $('#examples').insertAdjacentHTML('beforeend', EXAMPLES.map((e) => `<button type="button" class="chip example" data-ex="${esc(e)}">${esc(e.split(' ').slice(0, 7).join(' '))}…</button>`).join(''));
+  renderIdeaMode();
   $$('#depth button').forEach((b) => b.classList.toggle('on', b.dataset.depth === (settings.depth || 'quick')));
 
   $('#start-btn').addEventListener('click', startInterview);
   $('#idea').addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') startInterview(); });
   $('#examples').addEventListener('click', (e) => { const b = e.target.closest('[data-ex]'); if (b) { $('#idea').value = b.dataset.ex; $('#idea').focus(); } });
   $('#depth').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; settings.depth = b.dataset.depth; saveSettings(); $$('#depth button').forEach((x) => x.classList.toggle('on', x === b)); });
-  $('#mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#mode button').forEach((x) => x.classList.toggle('on', x === b)); });
+  $('#mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#mode button').forEach((x) => x.classList.toggle('on', x === b)); renderIdeaMode(); });
   $('#recent-list').addEventListener('click', (e) => { const l = e.target.closest('[data-load]'); if (l) return loadHistory(l.dataset.load); const d = e.target.closest('[data-del]'); if (d) deleteHistory(d.dataset.del); });
   $('#clear-history').addEventListener('click', () => { store.del('pf_history'); renderRecent(); });
 
@@ -2706,7 +2929,7 @@ function init() {
   // Installed as an app (from a website), the page keeps opening offline. A double-clicked file has no service worker.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
 
-  window.PromptForge = { state, DIMS, buildStructuredPrompt, settings, toList, deriveTitle, sortModels, localOriginHint, pinSections, PRESETS }; // handy for debugging / customizing / tests
+  window.PromptForge = { state, DIMS, VIDEO_DIMS, activeDims, buildStructuredPrompt, settings, toList, deriveTitle, sortModels, localOriginHint, pinSections, PRESETS }; // handy for debugging / customizing / tests
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>
