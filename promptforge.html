@@ -1185,7 +1185,7 @@ const VIDEO_DIMS = [
       if (/\b(?:include|add|with|want|use|needs?)\s+(?:(?:a|an|some)\s+)?(?:voice[ -]?over|narration|narrator)\b/i.test(text)) return { choices: ['Yes — write a voiceover script'], text, note: 'from your description' };
       return null;
     },
-    delegate: 'Recommend whether a voiceover would help. Keep any proposed narration optional until that choice is settled.',
+    delegate: 'Decide whether a voiceover would help, explain the choice, and use it in the finished video if appropriate. Do not add alternate versions unless requested.',
   },
   {
     id: 'videoCTA', label: 'Call to action', priority: 'important', type: 'single',
@@ -1719,32 +1719,35 @@ function videoVoiceoverRequested() {
 
 function videoDeliverableBody() {
   const voice = videoVoiceoverRequested()
-    ? 'Include a separate voiceover script, with each line matched to a scene and short enough for the requested duration.'
+    ? 'Create the requested voiceover and include it in the finished video, matched to the scenes and duration. A separate voiceover script may accompany the video as supporting material.'
     : delegated('videoVoiceover')
-      ? 'Recommend whether a voiceover would help; keep any proposed narration clearly optional.'
+      ? 'Choose whether voiceover would help, explain the choice, and produce the video accordingly. Create multiple versions only if I requested them.'
       : 'Use no voiceover and omit the voiceover script. Communicate through visuals and the requested on-screen text.';
-  return 'Give me a ready-to-copy video-generation prompt and a scene outline with timing, visuals, and on-screen text. ' + voice + ' Keep placeholders clearly marked wherever a product fact or asset is missing.';
+  return 'Create, render, and deliver the finished video described in this brief. Use the video-generation or editing tools available in this session, and provide a playable video or a downloadable video file. Do not rewrite this brief as another prompt, and do not stop at a scene outline, storyboard, or script. '
+    + voice + ' If an essential product fact or asset is missing, first check the supplied files and any project or repository you can access; ask only for what is still needed before rendering. Do not put unresolved placeholders into the finished video. '
+    + 'If no video tool is available in this session, explain that limitation and what tool or access is needed. Do not claim to have rendered a video unless you actually produced one. Provide another prompt instead of the video only if I explicitly ask for a prompt.';
 }
 
 function videoUnspecifiedBody() {
   const open = VIDEO_DIMS.filter((d) => ['missing', 'skipped'].includes(dimStatus(d.id)));
   if (!open.length) return '';
-  return `I have not specified: ${open.map((d) => d.label.toLowerCase()).join(', ')}. Treat these as open even if another section suggests a possible answer. Make simple creative suggestions and label them as suggestions. Use placeholders for missing product facts, selling points, brand details, and destinations. An unanswered or skipped voiceover means no spoken narration.`;
+  return `I have not specified: ${open.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible choices for unspecified creative details and briefly state them. Missing product facts, selling points, brand details, and destinations are unresolved, not permission to invent them; obtain anything essential before rendering. An unanswered or skipped voiceover means no spoken narration.`;
 }
 
 function videoRulesBody() {
   const rules = [
+    'Treat this brief as instructions to make the video. Use the scene outline and any narration below as production directions, not as a request to write another prompt.',
     'Use only supplied product facts. Do not invent claims, specifications, benefits, prices, discounts, testimonials, certifications, or guarantees.',
     'Keep the same product, packaging, logo, colours, and other supplied brand details consistent in every scene. Do not invent missing branding or change the product to suit a shot.',
-    'Photos, clips, and logos described in this brief have not been uploaded here. Refer to them by the names I supplied; ask for them in the chosen video tool before relying on details you cannot see.',
+    'PromptForge has not uploaded the described photos, clips, or logos. First inspect assets already supplied in this session or available in the project or repository you can access. Ask me only for required references you cannot find or open; do not invent a logo or app interface.',
     'Use plain-language visual and motion directions. Do not presume model-specific parameters, reference-image support, sound generation, or other capabilities of a particular video tool.',
-    'Preserve the meaning of my wording and restrictions. Label creative suggestions and use clear placeholders for missing facts instead of guessing.',
+    'Preserve my wording and restrictions. Resolve essential missing facts before rendering; do not include bracketed placeholders in the delivered video. Do not add alternate versions unless I requested them.',
     'Keep text legible for the selected placement, allow room for platform controls, and make scene timings add up to the chosen duration.',
   ];
   rules.push(videoVoiceoverRequested()
     ? 'Use the requested voiceover language and tone. Narration must use only supplied facts, match the scenes, and fit the duration; do not add dialogue or claims beyond the brief.'
     : delegated('videoVoiceover')
-      ? 'The voiceover decision is delegated: explain your recommendation and keep any proposed spoken audio optional.'
+      ? 'The voiceover decision is delegated: make and explain a suitable choice for the finished video, without inventing product claims.'
       : 'No voiceover or spoken dialogue. An unanswered, skipped, or disabled voiceover must stay off.');
   rules.push('If a request is impractical for the chosen video tool, explain the limitation and suggest a simple alternative before changing the brief.');
   return rules.map((r) => `- ${r}`).join('\n');
@@ -1759,10 +1762,10 @@ function buildVideoPrompt() {
     return quote(val(id));
   };
   const brief = [
-    'Create a product video using the brief and scene outline below. Keep the product accurate, make one supported main selling point clear, and respect the requested ending.',
+    'Create and deliver the finished product video using the brief and scene outline below. Use your available video tools to do the work; do not respond by rewriting this as another prompt. Keep the product accurate, make one supported main selling point clear, and respect the requested ending.',
     '**Original idea (my words):**\n' + quote(state.description.trim()),
     ...VIDEO_DIMS.map((d) => `**${d.label}:**\n${detail(d.id, `[${d.label.toLowerCase()} — not specified]`)}`),
-    'References described above are not attached or uploaded by this form. Supply them separately to the video tool before generating shots that depend on them.',
+    'This form does not upload references. Use assets already available to you in this session or the accessible project; request missing references only when needed for an accurate render.',
   ];
   let out = '# Video request\n\n' + section('Video-generation prompt', brief.join('\n\n'));
 
@@ -1781,7 +1784,7 @@ function buildVideoPrompt() {
     `### 1. Opening / hook — ${times[0]}\nVisual: Introduce [product name and appearance from the supplied brief] in a simple shot that fits the chosen style. Use an available reference photo when supplied.\nOn-screen text: [short product name or factual hook from the brief].`,
     `### 2. Product and main selling point — ${times[1]}\nVisual: Show one clear detail or demonstration that supports [main selling point supplied by me]. Keep the same product and brand details as the opening. Do not demonstrate an unverified capability.\nOn-screen text: [one short, supported selling point from the product brief].`,
     `### 3. ${noCTA ? 'Closing product shot' : 'Call to action'} — ${times[2]}\nVisual: Finish on a clear view of the same product, with the supplied brand reference if available.\nOn-screen text: ${noCTA ? 'No call to action; keep the ending focused on the product.' : '\n' + detail('videoCTA', '[desired action and destination — not specified]')}`,
-    'The bracketed text is an editable template. Replace it only with facts from the brief or supplied references. Adapt shot choices to the requested style and available assets, and keep every stated restriction.',
+    'Use this outline to produce the video. Resolve bracketed text using facts from the brief and accessible references; ask for essential missing facts before rendering. Adapt shots to the requested style and available assets, and keep every stated restriction.',
   ];
   out += section('Scene outline', scenes.join('\n\n'));
   if (videoVoiceoverRequested()) {
@@ -2005,7 +2008,7 @@ Guidelines:
 Return ONLY JSON, no prose, exactly in this shape:
 {"questions":[{"id":"short_snake_case","label":"2-3 word topic","question":"…","why":"one short sentence on why this matters","options":["…"],"allowMultiple":false,"covers":"dimension_id or other"}]}`;
 
-const VIDEO_QUESTION_SYSTEM = `You help someone plan a product video. Find the missing details needed for a useful video-generation prompt, scene outline and optional voiceover script.
+const VIDEO_QUESTION_SYSTEM = `You help someone prepare instructions for another assistant to create and deliver a finished product video. Find the missing production details for that brief, its scene outline and optional voiceover directions. The recipient's deliverable is the video itself, not another prompt or planning document.
 
 Ask only about unknown details that change the video: product and supported selling point, audience, placement and format, length, visual style, available reference assets, voiceover, and call to action. Respect skipped answers and decisions delegated to the AI. Never invent product claims or assume photos or logos have been uploaded. This is a video brief, so do not ask about software development, code, frameworks, hosting or databases.
 
@@ -2014,11 +2017,11 @@ Use plain language, one topic per question, and 2–5 short options where helpfu
 Return ONLY JSON in this shape:
 {"questions":[{"id":"short_snake_case","label":"2-3 word topic","question":"…","why":"one short sentence","options":["…"],"allowMultiple":false,"covers":"video dimension id or other"}]}`;
 
-const VIDEO_POLISH_SYSTEM = `Rewrite a person's product video brief as a ready-to-use prompt for a video tool or creative assistant. Keep their exact product facts, audience, placement, duration, visual style, available assets, voiceover decision and call to action.
+const VIDEO_POLISH_SYSTEM = `You are performing PromptForge's editing step. Rewrite a person's brief into direct instructions for the receiving assistant to create, render, and deliver a finished product video using its available tools. Open with that execution request. Never ask the recipient to write, refine, or return another prompt, scene outline, or script as the final deliverable. Keep their exact product facts, audience, placement, duration, visual style, available assets, voiceover decision and call to action.
 
 Use Markdown headings: title, Video-generation prompt, Scene outline, and Voiceover script only if the draft explicitly includes it. Make the scene outline practical with visuals, on-screen text and timing that fits the requested length. Preserve all limits and user wording that carries facts. Proposed creative choices must be labeled "(suggested)". Missing product names, claims, links, brand details and reference images must stay explicit placeholders; never invent them or claim assets were uploaded. Respect a no-voiceover answer, including text such as "no narration" even if a Yes option was chosen. Do not include a narration script when voiceover was skipped, undecided or delegated.
 
-You are preparing text, not rendering a video. Do not claim to have created footage or prescribe unsupported model parameters. Do not add software-building sections. Do not write "What I want from you", "Things I didn't specify", or "How to work with me": those sections are restored from the person's choices afterwards. Output only the prompt, with no commentary.`;
+Your role in this editing step is to prepare the text; the receiving assistant's role is to make the video. Do not copy your own text-only role into the brief or claim footage already exists. Tell the recipient to inspect provided assets and any project or repository it can access before requesting missing files. Do not invent extra deliverables such as voiced and unvoiced versions unless the person's answers request both. Do not prescribe unsupported model parameters or add software-building sections. Do not write "What I want from you", "Things I didn't specify", or "How to work with me": those production instructions are restored from the person's choices afterwards. Output only the production brief, with no commentary.`;
 
 // The shape QUESTION_SYSTEM asks for, enforced by the API (structured outputs / response_format) so a
 // stray sentence or a code fence can never turn a good question round into a fallback to built-in mode.
@@ -2701,6 +2704,18 @@ function saveHistory() {
   store.set('pf_history', list.slice(0, 20));
   renderRecent();
 }
+/** Update only our generated footer; normalizing the whole draft can remove answer fields. */
+function repairLegacyVideoInstructions(text) {
+  const bodies = {
+    'What I want from you': videoDeliverableBody(),
+    "Things I didn't specify": videoUnspecifiedBody(),
+    'How to work with me': videoRulesBody(),
+  };
+  return text.replace(/^## (What I want from you|Things I didn't specify|How to work with me)[ \t]*\r?\n[\s\S]*?(?=^#{1,2}[ \t]|(?![\s\S]))/gm,
+    (_, title) => section(title, bodies[title]).trimStart() + '\n')
+    .replace('References described above are not attached or uploaded by this form. Supply them separately to the video tool before generating shots that depend on them.',
+      'This form does not upload references. Use assets already available to you in this session or the accessible project; request missing references only when needed for an accurate render.');
+}
 function loadHistory(id) {
   const e = readHistory().find((x) => x.id === id); if (!e) return;
   cancelPolish();
@@ -2709,8 +2724,20 @@ function loadHistory(id) {
     id: e.id, mode: e.mode === 'video' ? 'video' : 'software', description: e.description || '', answers: e.answers || {}, extraQA: e.extraQA || [], asked: e.asked || [], aiQuestions: e.aiQuestions || [],
     depth: e.depth || 'quick', prompt: Object.assign({ structured: '', polished: '', view: 'structured', edited: false }, e.prompt || {}),
   });
+  // Repair our old generated instruction without overwriting any manually edited brief.
+  let repaired = false;
+  if (isVideo() && !state.prompt.edited) {
+    for (const view of ['structured', 'polished']) {
+      const text = state.prompt[view];
+      if (typeof text === 'string' && text.includes('Give me a ready-to-copy video-generation prompt and a scene outline')) {
+        state.prompt[view] = repairLegacyVideoInstructions(text);
+        repaired = true;
+      }
+    }
+  }
   if (!state.prompt.structured) state.prompt.structured = buildStructuredPrompt();
   showScreen('result'); renderResult();
+  if (repaired) { saveHistory(); toast('Updated this saved brief to request the finished video.', 'ok'); }
 }
 function renderRecent() {
   const list = readHistory();

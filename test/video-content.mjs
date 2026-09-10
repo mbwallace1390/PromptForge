@@ -20,6 +20,25 @@ function app(answers = {}, description = 'A product video for BOLT 2™.') {
 }
 const answer = (text, choices = []) => ({ text, choices, source: 'user' });
 
+test('exported video request asks its recipient to create the finished video, not another prompt', () => {
+  const run = app({ videoVoiceover: answer('', ['No voiceover — visuals and on-screen text only']) });
+  const result = run('buildVideoPrompt()');
+  const deliverable = result.split('## What I want from you\n')[1].split('\n## ')[0];
+  assert.match(deliverable, /(?:create|render|generate|produce|deliver)[^.\n]{0,100}\b(?:finished|rendered|actual)\s+(?:product\s+)?video/i, 'the exported deliverable must ask for the finished video');
+  assert.doesNotMatch(deliverable, /give me a ready-to-copy video-generation prompt/i, 'the old deliverable asks the recipient to write another prompt');
+  assert.match(result, /(?:do not|don't|never)[^.\n]{0,150}(?:rewrite|another prompt|return[^.\n]*prompt)/i, 'the recipient must be told not to replace execution with prompt writing');
+  assert.match(result, /(?:available[^.\n]{0,60}(?:tools|capabilities)|(?:video|media)[- ]generation tools)/i, 'the recipient must use available video tools');
+  assert.match(deliverable, /no voiceover|omit.*voiceover/i, 'requesting a finished video must preserve the narration opt-out');
+});
+
+test('the recipient must disclose unavailable rendering tools without pretending a video exists', () => {
+  const result = app()('buildVideoPrompt()');
+  assert.match(result, /(?:if|when)[^\n]{0,160}(?:cannot|can't|no |unavailable|lack|do not have|don't have)/i, 'the handoff needs an explicit unavailable-tool fallback');
+  assert.match(result, /(?:explain|state|say)[^\n]{0,100}(?:limit|cannot|can't|unavailable|tools|so plainly|so clearly)/i, 'the fallback must make the rendering limitation clear');
+  assert.match(result, /(?:do not|don't|never)[^\n]{0,150}(?:claim|pretend)[^\n]{0,100}(?:video|render|creat|complet|file)/i, 'a text-only response must not claim that rendering happened');
+  assert.match(result, /(?:ask|request)[^\n]{0,100}(?:asset|reference|photo|logo)/i, 'missing required assets must be requested');
+});
+
 test('video result preserves supplied facts and produces a scene outline without coding sections', () => {
   const facts = {
     videoProduct: answer('BOLT 2™ portable vacuum; main selling point: weighs 450 g.'),

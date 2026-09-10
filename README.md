@@ -32,6 +32,8 @@ Choose **Create a video** for a separate eight-question interview: product and m
 
 Describe the photos, clips, logos, or brand references you have; attach them later in your chosen video tool. PromptForge prepares text and does not upload assets or render videos. Missing product facts remain placeholders. Turning voiceover off or skipping it omits spoken narration. Video briefs use the same copy, download, editing, and history controls, and reopening one restores its video questions. Older software briefs remain compatible.
 
+The copied brief instructs the receiving assistant to **create and deliver the finished video**, using the scene outline as production directions. It should use its available video tools, inspect any accessible project assets, and explain plainly if it cannot render video. PromptForge's optional AI rewrite edits these instructions; it must not change the recipient's task into writing another prompt. Reopening an untouched saved video brief repairs the old prompt-only deliverable wording. Manually edited briefs are preserved.
+
 ## Optional AI mode
 
 Open **Settings** and pick a provider:

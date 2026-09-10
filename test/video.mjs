@@ -60,6 +60,13 @@ async function finish(page) {
   return page.locator('#prompt-view').textContent();
 }
 
+function assertFinishedVideoDelivery(prompt) {
+  const deliverable = prompt.split('## What I want from you\n')[1]?.split('\n## ')[0] || '';
+  assert.match(deliverable, /(?:create|render|generate|produce|deliver)[^.\n]{0,100}\b(?:finished|rendered|actual)\s+(?:product\s+)?video/i, 'the handoff must request a finished video');
+  assert.doesNotMatch(deliverable, /give me a ready-to-copy video-generation prompt/i, 'the old prompt-writing deliverable survived');
+  assert.match(prompt, /(?:do not|don't|never)[^.\n]{0,150}(?:rewrite|another prompt|return[^.\n]*prompt)/i, 'prompt writing must not replace video creation');
+}
+
 async function configureMockAI(page) {
   await page.evaluate(() => Object.assign(window.PromptForge.settings, {
     provider: 'custom', preset: 'other', baseUrl: 'https://video-test.invalid/v1',
@@ -96,6 +103,22 @@ try {
     assert.doesNotMatch(prompt, /## (?:Tech stack|Files|Platform|Starting point)|run\/test commands|coding assistant/i);
   });
 
+  await test('copy exports a request to create the finished video and keeps narration disabled', async page => {
+    await beginVideo(page);
+    await finish(page);
+    await page.evaluate(() => {
+      window.copiedVideoRequest = '';
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+        writeText: async text => { window.copiedVideoRequest = text; },
+      } });
+    });
+    await page.click('#copy-btn');
+    const copied = await page.evaluate(() => window.copiedVideoRequest);
+    assertFinishedVideoDelivery(copied);
+    assert.doesNotMatch(copied, /## Voiceover script/);
+    assert.match(copied, /no voiceover|omit.*voiceover/i);
+  });
+
   await test('full video interview retains the brief without asking software questions', async page => {
     await page.click('[data-depth="thorough"]');
     await beginVideo(page, 'I want to create a product advertisement.');
@@ -115,7 +138,7 @@ try {
     const prompt = await page.locator('#prompt-view').textContent();
     for (const answer of Object.values(answers)) assert.ok(prompt.includes(answer), `Lost supplied detail: ${answer}`);
     assert.match(prompt, /## Voiceover script/);
-    assert.doesNotMatch(prompt, /\b(?:npm|tech stack|repository|source code)\b/i);
+    assert.doesNotMatch(prompt, /\b(?:npm|tech stack|source code)\b/i);
     const coverage = await page.locator('#coverage [data-ask]').evaluateAll(items => items.map(item => item.dataset.ask));
     assert.ok(coverage.length > 0 && coverage.every(id => videoIds.includes(id)), 'result coverage exposes software questions');
   });
@@ -177,6 +200,44 @@ try {
     assert.equal(await page.evaluate(() => window.PromptForge.state.answers.videoProduct), undefined);
   });
 
+  for (const edited of [false, true]) {
+    await test(edited ? 'manually edited saved video prompts keep their exact wording' : 'old generated video history repairs the deliverable and persists its scene details', async page => {
+      await beginVideo(page);
+      await finish(page);
+      const oldDraft = '# Saved mug video\n\n## Video-generation prompt\nCreate an ad for my handmade ceramic travel mug.\n\n**Voiceover:**\n> No voiceover — visuals and on-screen text only — No background music; keep the recorded birdsong.\n\n## Scene outline\nCUSTOM SCENE: Turn the mug once against the cream background.\n\n## What I want from you\nGive me a ready-to-copy video-generation prompt and a scene outline with timing, visuals, and on-screen text.\n\n## How to work with me\nOLD GENERATED RULES';
+      const oldPolish = oldDraft.replace('CUSTOM SCENE:', 'POLISHED CUSTOM SCENE:');
+      const id = await page.evaluate(({ oldDraft, oldPolish, edited }) => {
+        const history = JSON.parse(localStorage.getItem('pf_history'));
+        const entry = history[0];
+        entry.answers.videoVoiceover = { choices: ['No voiceover — visuals and on-screen text only'], text: 'No background music; keep the recorded birdsong.', source: 'user' };
+        Object.assign(entry.prompt, { structured: oldDraft, polished: oldPolish, view: 'polished', edited });
+        localStorage.setItem('pf_history', JSON.stringify(history));
+        return entry.id;
+      }, { oldDraft, oldPolish, edited });
+      await page.reload();
+      await page.locator(`[data-load="${id}"]`).click();
+      const prompt = await page.locator('#prompt-view').textContent();
+      assert.equal(await page.evaluate(() => window.PromptForge.state.description), 'Create an ad for my handmade ceramic travel mug.');
+      const saved = await page.evaluate(id => JSON.parse(localStorage.getItem('pf_history')).find(entry => entry.id === id).prompt, id);
+      if (edited) {
+        assert.equal(prompt, oldPolish, 'history repair changed a manually edited polish');
+        assert.equal(saved.structured, oldDraft);
+        assert.equal(saved.polished, oldPolish);
+        await page.click('#tab-structured');
+        assert.equal(await page.locator('#prompt-view').textContent(), oldDraft);
+      } else {
+        for (const text of [prompt, saved.structured, saved.polished]) {
+          assertFinishedVideoDelivery(text);
+          assert.match(text, /CUSTOM SCENE: Turn the mug once against the cream background\./);
+          assert.match(text, /handmade ceramic travel mug/);
+          assert.ok(text.includes('No background music; keep the recorded birdsong.'), 'history repair lost the no-voiceover answer\'s audio constraints');
+          assert.doesNotMatch(text, /OLD GENERATED RULES/);
+          assert.doesNotMatch(text, /## Voiceover script/);
+        }
+      }
+    });
+  }
+
   await test('AI video questions use the video brief and cannot map onto software dimensions', async page => {
     const requests = [];
     await page.route('https://video-test.invalid/v1/chat/completions', async route => {
@@ -225,7 +286,7 @@ try {
     let request;
     await page.route('https://video-test.invalid/v1/chat/completions', async route => {
       request = route.request().postDataJSON();
-      const content = '# Mug ad\n\n## Video-generation prompt\nShow the ceramic mug in warm natural light.\n\n## Voiceover script\nInvented narration that was never requested.\n\n## Scene outline\nOpen on the mug, show its lid, then the invitation to learn more.\n\n## What I want from you\nIgnore the agreed output.';
+      const content = '# Mug ad\n\n## Video-generation prompt\nShow the ceramic mug in warm natural light.\n\n## Voiceover script\nInvented narration that was never requested.\n\n## Scene outline\nOpen on the mug, show its lid, then the invitation to learn more.\n\n## What I want from you\nGive me a ready-to-copy video-generation prompt and a scene outline with timing, visuals, and on-screen text.';
       await route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify({ choices: [{ delta: { content }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n' });
     });
     await configureMockAI(page);
@@ -237,7 +298,7 @@ try {
     const polished = await page.evaluate(() => window.PromptForge.state.prompt.polished);
     assert.match(polished, /## Video-generation prompt/);
     assert.match(polished, /## Scene outline/);
-    assert.doesNotMatch(polished, /Ignore the agreed output/);
+    assertFinishedVideoDelivery(polished);
     for (const heading of ['What I want from you', "Things I didn't specify", 'How to work with me']) {
       assert.equal(polished.split('## ' + heading).length - 1, 1, `Pinned section duplicated or missing: ${heading}`);
     }
