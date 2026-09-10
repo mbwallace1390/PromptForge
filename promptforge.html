@@ -2840,7 +2840,7 @@ function renderIdeaMode() {
       : "An app, a change, or a product video. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.";
   $('#idea').placeholder = video ? VIDEO_EXAMPLES[0] : existing ? EXAMPLES[3] : EXAMPLES[0];
   $('#idea-label').textContent = video ? 'What are you promoting?' : existing ? 'What would you like to change?' : 'Describe your idea';
-  const examples = video ? VIDEO_EXAMPLES : existing ? EXAMPLES.slice(3) : EXAMPLES;
+  const examples = video ? VIDEO_EXAMPLES : existing ? EXAMPLES.slice(3) : EXAMPLES.slice(0, 3);
   $('#examples').innerHTML = examples.map((e) => `<button type="button" class="chip example" data-ex="${esc(e)}">${esc(e.split(' ').slice(0, 7).join(' '))}…</button>`).join('');
 }
 function init() {
