@@ -29,15 +29,16 @@ self.addEventListener('fetch', (e) => {
     // Network first: an online load is always the latest version; offline falls back to the cached shell.
     e.respondWith(
       (async () => {
-        const cache = await caches.open(CACHE);
+        // Storage can become unavailable after installation; keep online delivery working.
+        const cache = await caches.open(CACHE).catch(() => null);
         try {
           const response = await fetch(req);
-          if (!response.ok) return (await cache.match(SHELL)) || response;
+          if (!response.ok) return (await cache?.match(SHELL).catch(() => undefined)) || response;
           // Await the write to keep it alive; a storage failure must not hide a working online app.
-          await cache.put(SHELL, response.clone()).catch(() => {});
+          await cache?.put(SHELL, response.clone()).catch(() => {});
           return response;
         } catch {
-          return (await cache.match(SHELL)) || Response.error();
+          return (await cache?.match(SHELL).catch(() => undefined)) || Response.error();
         }
       })(),
     );
@@ -47,11 +48,11 @@ self.addEventListener('fetch', (e) => {
   // Manifest and icons: cache first, fill this app's cache on first sight.
   e.respondWith(
     (async () => {
-      const cache = await caches.open(CACHE);
-      const hit = await cache.match(req);
+      const cache = await caches.open(CACHE).catch(() => null);
+      const hit = await cache?.match(req).catch(() => undefined);
       if (hit) return hit;
       const response = await fetch(req);
-      if (response.ok) await cache.put(req, response.clone()).catch(() => {});
+      if (response.ok) await cache?.put(req, response.clone()).catch(() => {});
       return response;
     })(),
   );

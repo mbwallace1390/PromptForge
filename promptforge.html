@@ -1181,6 +1181,7 @@ const VIDEO_DIMS = [
     options: ['Yes — write a voiceover script', 'No voiceover — visuals and on-screen text only'],
     placeholder: 'e.g. Warm, conversational voice in UK English; no music.',
     detect(text) {
+      if (videoVoiceoverVariantsRequested(text)) return { text, note: 'from your description' };
       if (videoVoiceoverRefused(text)) return { choices: ['No voiceover — visuals and on-screen text only'], text, note: 'from your description' };
       if (/\b(?:include|add|with|want|use|needs?)\s+(?:(?:a|an|some)\s+)?(?:voice[ -]?over|narration|narrator)\b/i.test(text)) return { choices: ['Yes — write a voiceover script'], text, note: 'from your description' };
       return null;
@@ -1208,6 +1209,7 @@ const state = {
   description: '',
   depth: settings.depth || 'quick',
   answers: {},        // dimId -> { choices:[], text:'', source:'user'|'detected'|'delegate'|'skipped', note?, via?, q? }
+  questionDrafts: {}, // Unsubmitted form values retained while navigating Back; never part of the brief.
   extraQA: [],        // AI questions that didn't map onto a dimension: { q, a }
   asked: [],          // question ids in the order they were asked (dims and ai_* ids)
   current: null,      // id of the question on screen
@@ -1221,7 +1223,7 @@ const state = {
 
 function resetState() {
   Object.assign(state, {
-    id: uid(), mode: 'software', screen: 'describe', description: '', answers: {}, extraQA: [], asked: [], current: null,
+    id: uid(), mode: 'software', screen: 'describe', description: '', answers: {}, questionDrafts: {}, extraQA: [], asked: [], current: null,
     aiQuestions: [], aiRound: 0, aiMode: false, aiDone: false, single: false,
     prompt: { structured: '', polished: '', view: 'structured', edited: false },
   });
@@ -1361,6 +1363,7 @@ function defaultedDim(d) {
 function commitAnswer(id, answer) {
   const q = questionById(id);
   if (!q) return;
+  delete state.questionDrafts[id]; // Next, Skip, and delegation replace any unfinished edit.
   const previousType = typeOf(state.answers);
   const previousDeliverables = DIM_BY_ID.deliverable.options();
   if (q.kind === 'dim') {
@@ -1388,13 +1391,27 @@ function commitAnswer(id, answer) {
   if (!state.asked.includes(id)) state.asked.push(id);
   runDetection();
   if (isVideo()) return; // Video answers cannot change software platforms or deliverables.
-  if (typeOf(state.answers) !== previousType) {
+  const typeChanged = typeOf(state.answers) !== previousType;
+  if (typeChanged) {
     // Platforms belong to the chosen type; a previous Android answer cannot describe a desktop app.
     delete state.answers.platform;
     state.asked = state.asked.filter((askedId) => askedId !== 'platform');
     runDetection();
   }
   const delivery = state.answers.deliverable;
+  for (const [draftId, draftAnswer] of Object.entries(state.questionDrafts)) {
+    const covered = DIM_BY_ID[draftId] ? draftId : state.aiQuestions.find((q) => q.id === draftId)?.covers;
+    // Dependent drafts use either a built-in ID or the ID of an AI question covering that dimension.
+    if (typeChanged && covered === 'platform') delete state.questionDrafts[draftId];
+    if (covered === 'deliverable') {
+      // Keep written detail, but a draft cannot restore choices removed by a mode change.
+      const available = DIM_BY_ID.deliverable.options();
+      draftAnswer.choices = draftAnswer.choices.filter((c) => {
+        const meaning = draftAnswer.choiceMeanings?.[c] || c;
+        return !previousDeliverables.includes(meaning) || available.includes(meaning);
+      });
+    }
+  }
   if (delivery && delivery.choices && delivery.choices.length) {
     const available = DIM_BY_ID.deliverable.options();
     const choices = delivery.choices.filter((c) => !previousDeliverables.includes(c) || available.includes(c));
@@ -1709,9 +1726,26 @@ function videoVoiceoverRefused(text) {
   return /\b(?:no|without|omit|skip)\s+(?:(?:a|an|any)\s+)?(?:voice[ -]?over|narration|narrator|spoken (?:words|audio|dialogue))\b|\b(?:music|visuals|text) only\b|\b(?:do not|don't) (?:include|add|use|want|need) (?:(?:a|an|any) )?(?:voice[ -]?over|narration|narrator)\b|\b(?:voice[ -]?over|narration)\s*(?::|is|=|-)?\s*(?:off|no|disabled|none)\b/i.test(String(text).replace(/’/g, "'"));
 }
 
+/** A paired request scopes the refusal to one version, not the entire delivery. */
+function videoVoiceoverVariantsRequested(text = state.answers.videoVoiceover?.text || val('videoVoiceover')) {
+  const audio = '(?:a\\s+)?(?:voice[ -]?over|narration|narrator)\\b';
+  const other = '\\s*(?:and|,)\\s*(?:(?:one|another|the other)(?:\\s+version)?\\s+)?';
+  const pair = new RegExp('\\b(?:with\\s+and\\s+without\\s+' + audio
+    + '|with\\s+' + audio + other + 'without\\s+' + audio
+    + '|without\\s+' + audio + other + 'with\\s+' + audio + ')', 'i');
+  const value = String(text);
+  const match = pair.exec(value);
+  if (!match) return false;
+  // Keep request negation scoped to the clause leading into the pair, regardless of version wording.
+  const beforePair = value.slice(0, match.index).replace(/’/g, "'");
+  if (/\b(?:do not|don't|never)\s+(?:want|need|create|make|produce|deliver|include|add|use)\b[^.!?,;\n]*$/i.test(beforePair)) return false;
+  return !videoVoiceoverRefused(value.replace(pair, ''));
+}
+
 /** Spoken audio is opt-in; a skipped answer or a written refusal overrides a selected Yes chip. */
 function videoVoiceoverRequested() {
   if (['missing', 'skipped', 'delegate'].includes(dimStatus('videoVoiceover'))) return false;
+  if (videoVoiceoverVariantsRequested()) return true;
   const text = val('videoVoiceover');
   if (videoVoiceoverRefused(text) || /^\s*(?:no|nope|off|none)[.!]?\s*$/i.test(state.answers.videoVoiceover.text || '')) return false;
   return /\byes\b|\b(?:voice[ -]?over|narration|narrator|spoken (?:words|audio))\b/i.test(text);
@@ -1719,7 +1753,9 @@ function videoVoiceoverRequested() {
 
 function videoDeliverableBody() {
   const voice = videoVoiceoverRequested()
-    ? 'Create the requested voiceover and include it in the finished video, matched to the scenes and duration. A separate voiceover script may accompany the video as supporting material.'
+    ? videoVoiceoverVariantsRequested()
+      ? 'Create the requested versions with and without voiceover. Include the requested narration only in the narrated version, matched to its scenes and duration; omit spoken audio from the version without voiceover. A separate voiceover script may accompany the videos as supporting material.'
+      : 'Create the requested voiceover and include it in the finished video, matched to the scenes and duration. A separate voiceover script may accompany the video as supporting material.'
     : delegated('videoVoiceover')
       ? 'Choose whether voiceover would help, explain the choice, and produce the video accordingly. Create multiple versions only if I requested them.'
       : 'Use no voiceover and omit the voiceover script. Communicate through visuals and the requested on-screen text.';
@@ -1745,7 +1781,8 @@ function videoRulesBody() {
     'Keep text legible for the selected placement, allow room for platform controls, and make scene timings add up to the chosen duration.',
   ];
   rules.push(videoVoiceoverRequested()
-    ? 'Use the requested voiceover language and tone. Narration must use only supplied facts, match the scenes, and fit the duration; do not add dialogue or claims beyond the brief.'
+    ? (videoVoiceoverVariantsRequested() ? 'Apply narration only to the requested version with voiceover; the version without voiceover must omit spoken audio. ' : '')
+      + 'Use the requested voiceover language and tone. Narration must use only supplied facts, match the scenes, and fit the duration; do not add dialogue or claims beyond the brief.'
     : delegated('videoVoiceover')
       ? 'The voiceover decision is delegated: make and explain a suitable choice for the finished video, without inventing product claims.'
       : 'No voiceover or spoken dialogue. An unanswered, skipped, or disabled voiceover must stay off.');
@@ -1779,7 +1816,7 @@ function buildVideoPrompt() {
   const times = seconds > 0 && Number.isFinite(seconds)
     ? [`0–${mark(0.2)} s`, `${mark(0.2)}–${mark(0.8)} s`, `${mark(0.8)}–${mark(1)} s`]
     : ['[opening 20% of the chosen duration]', '[middle 60% of the chosen duration]', '[final 20% of the chosen duration]'];
-  const noCTA = !delegated('videoCTA') && /^no call to action(?:$|\s*[—.])/i.test(val('videoCTA'));
+  const noCTA = !delegated('videoCTA') && /^no call to action(?:$|\s*[—.,;:!])/i.test(val('videoCTA'));
   const scenes = [
     `### 1. Opening / hook — ${times[0]}\nVisual: Introduce [product name and appearance from the supplied brief] in a simple shot that fits the chosen style. Use an available reference photo when supplied.\nOn-screen text: [short product name or factual hook from the brief].`,
     `### 2. Product and main selling point — ${times[1]}\nVisual: Show one clear detail or demonstration that supports [main selling point supplied by me]. Keep the same product and brand details as the opening. Do not demonstrate an unverified capability.\nOn-screen text: [one short, supported selling point from the product brief].`,
@@ -2178,7 +2215,7 @@ const API = {
       try {
         if (!stream) {
           const j = await parseResponse(r);
-          return this.anthropicResult((j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(''), j.stop_reason, j.stop_details);
+          return this.anthropicResult((Array.isArray(j.content) ? j.content : []).filter((c) => c && c.type === 'text' && typeof c.text === 'string').map((c) => c.text).join(''), j.stop_reason, j.stop_details);
         }
         if (!r.ok) await parseResponse(r); // throws with the API's error message
         let text = '', stop = null, details = null;
@@ -2211,7 +2248,7 @@ const API = {
         const j = await parseResponse(r);
         const choice = (j.choices && j.choices[0]) || {};
         const content = choice.message ? choice.message.content : '';
-        return this.openaiResult(Array.isArray(content) ? content.map((c) => c.text || '').join('') : String(content || ''), choice.finish_reason);
+        return this.openaiResult(Array.isArray(content) ? content.map((c) => c && typeof c.text === 'string' ? c.text : '').join('') : typeof content === 'string' ? content : '', choice.finish_reason);
       }
       if (!r.ok) await parseResponse(r);
       let text = '', stop = null;
@@ -2230,10 +2267,12 @@ const API = {
   },
   anthropicResult(text, stop, details) {
     if (stop === 'refusal') throw new Error('the model declined this request' + (details && details.explanation ? ': ' + details.explanation : ''));
+    if (!text.trim()) throw new Error('the API returned no model text; check the model and address, or try again');
     return { text, truncated: stop === 'max_tokens' };
   },
   openaiResult(text, stop) {
     if (stop === 'content_filter') throw new Error('the model declined this request');
+    if (!text.trim()) throw new Error('the API returned no model text; check the model and address, or try again');
     return { text, truncated: stop === 'length' };
   },
   async models(config = settings, signal) {
@@ -2372,7 +2411,7 @@ function hideThinking() { $('#thinking').classList.add('hidden'); $('#qcard').cl
 function showQuestion(id) {
   const q = questionById(id); if (!q) return;
   state.current = id;
-  const existing = getAnswerFor(id);
+  const existing = state.questionDrafts[id] || getAnswerFor(id);
   // Keyword hits from the description arrive pre-filled; Next keeps them, or the user edits first.
   const pre = existing && isUnconfirmed(existing) && q.prefill ? q.prefill(existing.hits) : null;
   const opts = typeof q.options === 'function' ? q.options(state.answers) : (q.options || []);
@@ -2469,7 +2508,16 @@ function onBack() {
   const i = state.asked.indexOf(state.current);
   const previous = state.asked.slice(0, i >= 0 ? i : state.asked.length).filter(questionApplies);
   const prev = previous[previous.length - 1];
-  if (prev) showQuestion(prev);
+  if (prev) {
+    const { q, answer } = readAnswer();
+    if (q.kind === 'ai' && q.covers === 'deliverable') {
+      // Interpret AI labels in the current mode, before Back can change that mode.
+      answer.choiceMeanings = Object.fromEntries(answer.choices.map((choice) =>
+        [choice, canonicalize('deliverable', { choices: [choice], text: '', source: 'user' }).choices?.[0] || choice]));
+    }
+    state.questionDrafts[state.current] = answer;
+    showQuestion(prev);
+  }
 }
 function onChipClick(e) {
   const chip = e.target.closest('.chip'); if (!chip) return;
@@ -2770,6 +2818,7 @@ function clearDraftCredentials() {
 function openSettings() {
   cancelSettingsRequest();
   Object.assign(draft, settings);
+  $('#s-key').type = 'password'; $('#s-key-toggle').textContent = 'Show';
   $('#settings-modal').classList.remove('hidden');
   renderSettings();
   $('#s-test-result').textContent = '';

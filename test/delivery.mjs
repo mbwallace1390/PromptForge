@@ -101,15 +101,20 @@ test('a busy port occupied by another app is reported as a startup failure', asy
 async function workerHarness() {
   const listeners = new Map();
   const stores = new Map();
+  const storageFailure = { open: false, match: false };
   const scope = 'https://example.test/PromptForge/';
   const absolute = (req) => new URL(typeof req === 'string' ? req : req.url, scope).href;
   const network = { fetch: async () => new Response('<title>Healthy app</title>', { headers: { 'Content-Type': 'text/html' } }) };
   const caches = {
     async open(name) {
+      if (storageFailure.open) throw new Error('Cache storage unavailable');
       if (!stores.has(name)) stores.set(name, new Map());
       const entries = stores.get(name);
       return {
-        async match(req) { return entries.get(absolute(req))?.clone(); },
+        async match(req) {
+          if (storageFailure.match) throw new Error('Cache read unavailable');
+          return entries.get(absolute(req))?.clone();
+        },
         async put(req, response) { entries.set(absolute(req), response.clone()); },
         async add(req) { await this.put(req, await network.fetch(req)); },
         async addAll(requests) { for (const req of requests) await this.add(req); },
@@ -139,7 +144,7 @@ async function workerHarness() {
   }
   await dispatch('install');
   const navigation = (url = scope) => ({ url, method: 'GET', mode: 'navigate' });
-  return { stores, network, dispatch, scope, navigation };
+  return { stores, network, dispatch, scope, navigation, storageFailure };
 }
 
 test('service-worker activation preserves caches owned by other apps and scopes', async () => {
@@ -178,6 +183,39 @@ test('successful online navigation refreshes the offline shell', async () => {
   await worker.dispatch('fetch', worker.navigation(`${worker.scope}index.html`));
   worker.network.fetch = async () => { throw new TypeError('Offline'); };
   assert.match(await (await worker.dispatch('fetch', worker.navigation())).text(), /Updated app/);
+});
+
+test('cache storage failure does not block healthy online navigation or public assets', async () => {
+  for (const kind of ['navigation', 'asset']) {
+    const worker = await workerHarness();
+    worker.storageFailure.open = true;
+    const request = kind === 'navigation' ? worker.navigation() : {
+      url: `${worker.scope}manifest.webmanifest`, method: 'GET', mode: 'cors',
+    };
+    worker.network.fetch = async () => new Response('Live response');
+    const response = await worker.dispatch('fetch', request);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'Live response', kind);
+  }
+});
+
+test('a failed asset cache read still allows a healthy network response', async () => {
+  const worker = await workerHarness();
+  worker.storageFailure.match = true;
+  worker.network.fetch = async () => new Response('Live manifest');
+  const response = await worker.dispatch('fetch', {
+    url: `${worker.scope}manifest.webmanifest`, method: 'GET', mode: 'cors',
+  });
+  assert.equal(await response.text(), 'Live manifest');
+});
+
+test('an unavailable fallback cache preserves the actual HTTP error response', async () => {
+  const worker = await workerHarness();
+  worker.storageFailure.match = true;
+  worker.network.fetch = async () => new Response('Server unavailable', { status: 503 });
+  const response = await worker.dispatch('fetch', worker.navigation());
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), 'Server unavailable');
 });
 
 test('browser: the Pages subpath preserves other caches and opens the real app offline', async (t) => {
