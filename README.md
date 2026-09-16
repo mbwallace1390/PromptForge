@@ -1,6 +1,6 @@
 # PromptForge
 
-Turns a rough, plain-English idea into a detailed AI prompt for a new app or tool, a change to an existing app, or a product video. The app asks follow-up questions one at a time and assembles a structured prompt with a brief coverage score and checklist. The score shows how much detail you supplied; your prompt is usable at any score.
+Turns a rough, plain-English idea into a detailed AI prompt for a new app or tool, a change to an existing app, a product video, or an animated phone wallpaper. The app asks follow-up questions one at a time and assembles a structured prompt with a brief coverage score and checklist. The score shows how much detail you supplied; your prompt is usable at any score.
 
 Everything is in one file: `promptforge.html`. No install, no server, no build step.
 
@@ -16,7 +16,7 @@ Using a model on your own computer (Ollama, LM Studio) from the double-clicked f
 
 ## How it works
 
-1. **Describe** — choose **New app or tool**, **Change an existing app**, or **Create a video**, then write what you want in your own words. Quick mode focuses on the essentials; Thorough includes every built-in question and allows more AI follow-ups.
+1. **Describe** — choose **New app or tool**, **Change an existing app**, or **Video or animation**, then write what you want in your own words. Video or animation offers **Product video** and **Animated wallpaper**. Quick mode focuses on the essentials; Thorough includes every built-in question and allows more AI follow-ups.
 2. **Refine** — before asking anything, keyword detectors read the description. Clear statements (type, platform, audience, experience level, existing project, a project name) are taken as answered and those questions are skipped; looser keyword hits (tech mentioned, constraints, look and feel, outside services) appear in the brief, pre-fill their question, and are confirmed with one press of *Next*. Each remaining question has quick-pick chips, a free-text box, *Skip*, and *Let the AI decide* (which turns into explicit "choose and tell me what you chose" language in the prompt). The "Your brief so far" panel fills in live.
 3. **Your prompt** — a structured Markdown prompt with copy, download, in-place editing, and one-click open in Claude or ChatGPT (copies to the clipboard and pre-fills the page when the prompt is short enough). The coverage list lets the user answer or change any single item without redoing the interview. Anything not specified is called out in a "Things I didn't specify" section so the AI knows to choose sensibly and say so.
 
@@ -28,11 +28,17 @@ Not sure what should change? Say "review it and suggest improvements" (or pick t
 
 ### Creating a product video
 
-Choose **Create a video** for a separate eight-question interview: product and main selling point, audience, placement and format, length, visual style, available assets, voiceover, and call to action. Built-in mode produces a **video-generation prompt**, a **scene outline** with timing and editable placeholders, and a **voiceover script template** when requested. It works without an API key. AI assistance can tailor the questions and rewrite the brief into more specific scenes and narration.
+Choose **Video or animation → Product video** for a separate eight-question interview: product and main selling point, audience, placement and format, length, visual style, available assets, voiceover, and call to action. Built-in mode produces a **video-generation prompt**, a **scene outline** with timing and editable placeholders, and a **voiceover script template** when requested. It works without an API key. AI assistance can tailor the questions and rewrite the brief into more specific scenes and narration.
 
 Describe the photos, clips, logos, or brand references you have; attach them later in your chosen video tool. PromptForge prepares text and does not upload assets or render videos. Missing product facts remain placeholders. Turning voiceover off or skipping it omits spoken narration. Video briefs use the same copy, download, editing, and history controls, and reopening one restores its video questions. Older software briefs remain compatible.
 
 The copied brief instructs the receiving assistant to **create and deliver the finished video**, using the scene outline as production directions. It should use its available video tools, inspect any accessible project assets, and explain plainly if it cannot render video. PromptForge's optional AI rewrite edits these instructions; it must not change the recipient's task into writing another prompt. Reopening an untouched saved video brief repairs the old prompt-only deliverable wording. Manually edited briefs are preserved.
+
+### Creating an animated phone wallpaper
+
+Choose **Video or animation → Animated wallpaper**. The interview covers the subject, phone and intended screen, visual style, motion, looping, duration, room for the clock and icons, and reference assets. The brief defaults to silent animation without promotional content and asks the receiving assistant to render and deliver the finished animation using its available tools.
+
+The brief preserves your choices and asks the receiving assistant to verify support for your exact phone, operating system, and intended home-screen or lock-screen use before choosing export and setup steps. It does not guess missing screen dimensions or promise that one file works everywhere. PromptForge prepares the brief; it does not render or install wallpapers. Wallpaper briefs support editing, copy, download, optional AI assistance, and saved history.
 
 ## Optional AI mode
 

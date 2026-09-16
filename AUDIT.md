@@ -1,5 +1,21 @@
 # PromptForge audits
 
+## September 16, 2026 — animated wallpaper workflow
+
+Added **Video or animation → Animated wallpaper** beside the existing **Product video** subtype. The homepage still has three main choices. The new eight-topic interview covers the scene, phone and intended screen, style, movement, looping, duration, clock/icon space, and references. It works in built-in mode without an API key, with its own optional AI questions and rewrite instructions.
+
+Wallpaper briefs request a **finished rendered animation**, not another prompt. They default to silence, seamless looping, and no promotional content while preserving explicit user directions. Device-specific export/setup instructions require verified phone, OS, and intended-screen support; the brief does not guess screen dimensions or promise universal installation. PromptForge itself still prepares text and does not render or install wallpaper.
+
+Wallpaper has a separate saved mode and question bank. Product-video and software history remain compatible, edited text is retained exactly, and AI questions mapped to another workflow are discarded. The service-worker cache version advances for the updated app metadata.
+
+### Verification
+
+Added **13 browser regression checks** covering selection, all eight questions, early finish, exact user wording, Back drafts, saved and legacy history, manual edits, AI routing/fallback/rewrite, narration rules, and 320/390px layouts. The pre-feature build failed all 13 on the absent wallpaper choice. Independent review found a paired narrated/silent-version edge case; its regression failed before the fix and passed afterward, including negated variants and separate narration refusals. No review findings remain outstanding.
+
+The final complete suite passed **168 tests** with installed Chrome (`PF_BROWSER_CHANNEL=chrome`), including all 155 existing checks. `git diff --check` passed. The wallpaper suite is included in `npm test`.
+
+Inspected desktop/dark and phone/light-dark screenshots, with **9 layout states** checked across 1280px, 390px, and 320px widths. No horizontal overflow or page errors were found. AI tests use mocked responses; no paid provider calls or animation rendering were performed. Real-phone wallpaper installation is outside this text-generation feature's verification.
+
 ## September 16, 2026
 
 Used the installed UXCritique and UIAudit guidance for two independent assessments of Describe, Refine, Results, and Settings, then applied HardenUI and Polish to the confirmed findings. Preserved the three workflows, existing amber identity, light/dark themes, single-file architecture, and optional AI model. No dependencies were added.

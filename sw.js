@@ -1,7 +1,7 @@
 // Cache only PromptForge's public files. API calls and other pages pass straight through.
 // GitHub Pages apps share an origin, so cache ownership must include this worker's scope.
 const CACHE_PREFIX = `promptforge:${self.registration.scope}:`;
-const CACHE = `${CACHE_PREFIX}v2`;
+const CACHE = `${CACHE_PREFIX}v3`;
 const SHELL = new URL('./', self.location.href).href;
 const SHELL_PATHS = new Set(['./', 'index.html', 'promptforge.html'].map((p) => new URL(p, SHELL).pathname));
 const ASSET_PATHS = new Set([

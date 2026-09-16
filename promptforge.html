@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
-<title>PromptForge — AI prompts for apps and product videos</title>
-<meta name="description" content="Turn an app idea, an existing-app change, or a product video concept into a detailed AI prompt with guided questions, scene outlines, and optional voiceover scripts.">
+<title>PromptForge — AI prompts for apps, videos and animated wallpapers</title>
+<meta name="description" content="Turn an app idea, an existing-app change, a product video, or an animated phone wallpaper into a detailed AI prompt with guided questions.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161a22'/%3E%3Cpath d='M32 10c6 8 12 12 12 22a12 12 0 0 1-24 0c0-5 2-8 4-11 0 5 2 7 4 8 0-9 2-14 4-19z' fill='%23f5a524'/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
@@ -190,6 +190,7 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .mode-copy strong { font-size: .96rem; line-height: 1.3; padding-right: .7rem; }
 .mode-copy small { font-size: .82rem; line-height: 1.4; color: var(--muted); }
 .mode-choices button.on::after { content: '✓'; position: absolute; right: .65rem; top: .45rem; color: var(--accent); font-size: .8rem; font-weight: 800; }
+.media-kind { margin-bottom: 1rem; }
 .idea-box { max-width: 920px; margin: 0 auto; padding: 1.4rem 1.5rem 1rem; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-2); box-shadow: var(--shadow-sm); }
 .idea-label { display: block; font-weight: 700; margin-bottom: .6rem; }
 #idea { min-height: 155px; font-size: 1.02rem; line-height: 1.65; padding: .8rem 1rem; border-radius: var(--radius-sm); background: var(--bg); resize: vertical; }
@@ -394,7 +395,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
   <section class="screen" id="screen-describe">
     <div class="hero">
       <h1 id="idea-heading">Tell me what you want to create.</h1>
-      <p id="idea-intro">An app, a change, or a product video. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.</p>
+      <p id="idea-intro">An app, a change, a product video, or an animated wallpaper. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.</p>
     </div>
     <div class="mode-choices" id="mode" role="group" aria-label="What do you want to create?">
       <button type="button" data-mode="new" class="on" aria-pressed="true">
@@ -407,10 +408,14 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
       </button>
       <button type="button" data-mode="video" aria-pressed="false">
         <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M7 5l3 5m3-5 3 5M10 13l5 3-5 3v-6Z"/></svg>
-        <span class="mode-copy"><strong>Create a video</strong><small>Plan scenes, style, and optional narration.</small></span>
+        <span class="mode-copy"><strong>Video or animation</strong><small>Create a product video or animated wallpaper.</small></span>
       </button>
     </div>
     <div class="idea-box">
+      <div class="chips media-kind hidden" id="media-kind" role="group" aria-label="Video or animation type">
+        <button class="chip selected" type="button" data-media="video" aria-pressed="true">Product video</button>
+        <button class="chip" type="button" data-media="wallpaper" aria-pressed="false">Animated wallpaper</button>
+      </div>
       <label for="idea" class="idea-label" id="idea-label">Describe your idea</label>
       <textarea id="idea" placeholder="e.g. An app for my RC club where members can log flights, keep track of battery cycles, and see who's flying this weekend. It should work on phones and not need a login for viewing."></textarea>
       <details class="inspiration"><summary>Need a starting point? Try an example</summary><div class="examples" id="examples"></div></details>
@@ -789,10 +794,12 @@ function typeOf(answers) {
  * what must keep working and how it is run, and the prompt becomes a change request. One source of truth.
  */
 function isVideo(s = state) { return s.mode === 'video'; }
-function activeDims(s = state) { return isVideo(s) ? VIDEO_DIMS : DIMS; }
+function isWallpaper(s = state) { return s.mode === 'wallpaper'; }
+function isMedia(s = state) { return isVideo(s) || isWallpaper(s); }
+function activeDims(s = state) { return isWallpaper(s) ? WALLPAPER_DIMS : isVideo(s) ? VIDEO_DIMS : DIMS; }
 function activeDim(id) { return activeDims().find((d) => d.id === id); }
 function isExisting(s = state) {
-  if (isVideo(s)) return false;
+  if (isMedia(s)) return false;
   const a = s.answers.startingPoint;
   if (!a || a.source === 'skipped' || a.source === 'delegate') return false;
   const c = (a.choices || []).join(' ');
@@ -1205,14 +1212,79 @@ const VIDEO_DIMS = [
     delegate: 'Suggest one simple call to action that fits the brief. Leave the destination as a placeholder unless I supplied it; do not invent an offer or discount.',
   },
 ];
-const DIM_BY_ID = Object.fromEntries([...DIMS, ...VIDEO_DIMS].map((d) => [d.id, d]));
+// Wallpaper questions describe an animation for a phone, without advertising assumptions.
+const WALLPAPER_DIMS = [
+  {
+    id: 'wallpaperSubject', label: 'Scene or subject', priority: 'essential', type: 'text', big: true,
+    question: 'What would you like your animated wallpaper to show?',
+    why: 'Describe the scene, colours, and details you want to keep or avoid.',
+    placeholder: 'e.g. A crescent moon above a dark ocean, with soft blue reflections and no people.',
+    delegate: 'Work from the scene in my original description. Make simple creative suggestions for missing details and label them as suggestions.',
+  },
+  {
+    id: 'wallpaperDevice', label: 'Phone and wallpaper use', priority: 'essential', type: 'text',
+    question: 'Which phone is it for, and will you use it on the home screen, lock screen, or both?',
+    why: 'Phone model, software version, and screen choice affect which animated formats can actually be used.',
+    placeholder: 'e.g. My phone model and Android or iOS version, if known; lock screen only. Add the exact screen size if you know it.',
+    delegate: 'Ask for my exact phone model and intended home-screen or lock-screen use before choosing device-specific export or setup steps. Verify the relevant OS support; do not guess my screen size or supported formats.',
+  },
+  {
+    id: 'wallpaperStyle', label: 'Visual style', priority: 'important', type: 'multi',
+    question: 'What should it look and feel like?',
+    why: 'Choose the style and mood you want to see whenever you pick up your phone.',
+    options: ['Calm and minimal', 'Cinematic', 'Nature-inspired', 'Abstract', 'Illustrated', 'Pixel art'],
+    placeholder: 'e.g. Deep navy and silver, soft light, and a clean background.',
+    delegate: 'Choose a coherent visual style for the supplied scene and label it as a creative suggestion.',
+  },
+  {
+    id: 'wallpaperMotion', label: 'Movement', priority: 'important', type: 'single',
+    question: 'What should move, and how much movement do you want?',
+    why: 'A small moving detail can keep the screen comfortable to look at and the subject easy to recognise.',
+    options: ['Very subtle movement', 'Gentle continuous motion', 'Lively motion', 'Something else (describe below)'],
+    placeholder: 'e.g. Only the water and clouds move; keep the camera still. No flashes or quick cuts.',
+    delegate: 'Suggest gentle movement that suits the scene. Keep the camera steady and avoid flashing or rapid cuts unless I requested them.',
+  },
+  {
+    id: 'wallpaperLoop', label: 'Loop behaviour', priority: 'important', type: 'single',
+    question: 'How should the animation repeat?',
+    why: 'A seamless loop returns naturally to its beginning without a visible jump.',
+    options: ['Seamless loop', 'Play forward then backward', 'Play once without looping'],
+    placeholder: 'e.g. Match the first and last frames, with no fade to black between repeats.',
+    delegate: 'Use a seamless loop unless my description says otherwise. Check the join for visible jumps and abrupt changes in movement.',
+  },
+  {
+    id: 'wallpaperLength', label: 'Animation length', priority: 'important', type: 'single',
+    question: 'How long should one animation cycle be?',
+    why: 'The length should suit the movement and the format supported by your phone.',
+    options: ['5 seconds', '10 seconds', '15 seconds', 'Another length (describe below)'],
+    placeholder: 'e.g. A slow 8-second cycle, if my phone supports it.',
+    delegate: 'Suggest a short duration that suits the motion and verified device support. State the suggested length before rendering; do not present an unverified duration limit as a device fact.',
+  },
+  {
+    id: 'wallpaperLayout', label: 'Clock and icon space', priority: 'important', type: 'multi',
+    question: 'Where should the wallpaper leave room for your clock, icons, and other screen controls?',
+    why: 'Quiet areas help your phone information stay readable without covering the main subject.',
+    options: ['Leave room for the clock at the top', 'Keep icons readable', 'Keep the main subject in the centre', 'I will describe my layout below'],
+    placeholder: 'e.g. Leave the upper third dark for a white clock; keep the moon away from the camera cutout.',
+    delegate: 'Suggest a composition with quiet space for the clock and icons. Verify the actual device layout and cropping rather than inventing exact safe-area dimensions.',
+  },
+  {
+    id: 'wallpaperAssets', label: 'Reference images or clips', priority: 'important', type: 'single',
+    question: 'Do you have a picture, clip, or style reference you want to use?',
+    why: 'Describe references here and attach them later in your chosen animation tool.',
+    options: ['I have an image to animate', 'I have reference images or clips', 'Create it from my description'],
+    placeholder: 'e.g. Use moon-photo.jpg as the background. This form does not upload files.',
+    delegate: 'Use my description and any accessible references. Ask only for references essential to the requested result; do not claim unseen files were supplied or inspected.',
+  },
+];
+const DIM_BY_ID = Object.fromEntries([...DIMS, ...VIDEO_DIMS, ...WALLPAPER_DIMS].map((d) => [d.id, d]));
 const PRIORITY_WEIGHT = { essential: 3, important: 2, optional: 1 };
 const QUICK_LIMIT = 8;
 
 /* ---------- 4. State & interview engine ---------- */
 const state = {
   id: null,
-  mode: 'software',   // Video has its own bank; software startingPoint still selects new/existing.
+  mode: 'software',   // Video and wallpaper each have a bank; software startingPoint selects new/existing.
   screen: 'describe',
   description: '',
   depth: settings.depth || 'quick',
@@ -1399,7 +1471,7 @@ function commitAnswer(id, answer) {
   }
   if (!state.asked.includes(id)) state.asked.push(id);
   runDetection();
-  if (isVideo()) return; // Video answers cannot change software platforms or deliverables.
+  if (isMedia()) return; // Media answers cannot change software platforms or deliverables.
   const typeChanged = typeOf(state.answers) !== previousType;
   if (typeChanged) {
     // Platforms belong to the chosen type; a previous Android answer cannot describe a desktop app.
@@ -1527,6 +1599,7 @@ const BEGINNER_DELIVERABLE = "I'm new to this, so give me the simplest thing tha
 const isBeginner = () => !delegated('skillLevel') && has(val('skillLevel'), BEGINNER_RE);
 const beginnerDeliverable = () => isBeginner() && dimStatus('deliverable') === 'missing';
 function deliverableBody() {
+  if (isWallpaper()) return wallpaperDeliverableBody();
   if (isVideo()) return videoDeliverableBody();
   if (delegated('deliverable')) return delegateLine('deliverable');
   const t = val('deliverable');
@@ -1849,7 +1922,64 @@ function buildVideoPrompt() {
   return out.trim() + '\n';
 }
 
+function wallpaperDeliverableBody() {
+  return 'Create, render, and deliver the finished animated phone wallpaper described in this brief. Use the animation or video tools available in this session, and provide a playable preview and a downloadable file in a format verified for my phone and intended wallpaper use. Do not rewrite this brief as another prompt, and do not stop at a storyboard or written animation plan. '
+    + 'Keep it silent, with no music, voiceover, promotional text, logos, or call to action unless I explicitly requested them. Respect my requested loop behaviour; otherwise make a seamless loop. '
+    + 'Before selecting export settings or giving setup instructions, verify the exact phone model, OS version, and home-screen or lock-screen support. Ask for essential missing device details; do not invent a resolution or promise that a video file can be installed as wallpaper on every phone. '
+    + 'Inspect references already supplied in this session or available in an accessible project before asking for missing files. If no suitable rendering tool is available, explain the limitation and what tool or access is needed. If the requested animated wallpaper is unsupported on my device, explain the limitation and suggest a workable alternative before changing the request. Do not claim a file was rendered or tested on my phone unless that actually happened. Provide another prompt instead of the animation only if I explicitly ask for a prompt.';
+}
+
+function wallpaperUnspecifiedBody() {
+  const open = WALLPAPER_DIMS.filter((d) => ['missing', 'skipped'].includes(dimStatus(d.id)));
+  if (!open.length) return '';
+  return `I have not answered these topics separately: ${open.map((d) => d.label.toLowerCase()).join(', ')}. Use any details I already supplied in my original description or other answers. For remaining creative choices, make simple suggestions and identify them as suggestions. Default to a silent, seamless animation unless I requested otherwise. Missing phone specifications, supported formats, and required reference files are unresolved facts, not permission to invent them. Obtain and verify the device details needed for export and setup.`;
+}
+
+function wallpaperRulesBody() {
+  return [
+    'Treat this brief as instructions to produce the finished animated wallpaper using available tools. A rewritten prompt or animation plan alone does not complete the request.',
+    'Preserve my scene, colours, movement, timing, loop choice, references, and restrictions. Keep my wording when it carries specific requirements; label any added creative choices as suggestions.',
+    'Keep the animation silent by default. Include music, narration, sound effects, text, logos, or promotional content only when I explicitly requested them. Do not add a sales message or call to action to an ordinary wallpaper.',
+    'Use my requested loop behaviour. If I did not specify one, create a seamless loop and check the join for visible jumps, lighting changes, or abrupt movement. Do not force a loop when I requested a one-time animation.',
+    'Compose for the intended screen, leaving the requested space for the clock, icons, camera cutouts, and controls. Verify device dimensions and cropping before export; do not assume every phone uses the same aspect ratio or safe areas.',
+    'Verify support for the exact phone model, OS version, and intended home-screen or lock-screen use before prescribing a file format or setup method. Explain any support limitation and suggest a practical alternative; do not promise universal animated-wallpaper installation.',
+    'PromptForge has not uploaded the described reference images or clips. Inspect files already available in this session or an accessible project; request only essential references you cannot find or open. Do not claim to have seen an unavailable image.',
+    'Use capabilities that the selected rendering tool actually supports. If a requested effect, duration, or export is impractical, explain the limitation and suggest a simple alternative before changing the brief.',
+    'Check the delivered animation for the requested timing, loop behaviour, framing, and unwanted audio. Describe what you actually verified and give device-appropriate setup steps only after confirming support. Do not claim real-device testing from a preview alone.',
+  ].map((rule) => `- ${rule}`).join('\n');
+}
+
+/** Narration stays opt-in even when an AI rewrite adds an unsolicited script section. */
+function wallpaperNarrationRequested() {
+  const supplied = [state.description, ...WALLPAPER_DIMS.filter((d) => !['missing', 'skipped', 'delegate'].includes(dimStatus(d.id))).map((d) => val(d.id)), ...state.extraQA.map((answer) => answer.a)].join('\n');
+  if (videoVoiceoverVariantsRequested(supplied)) return true;
+  return !videoVoiceoverRefused(supplied) && /\b(?:voice[ -]?over|narration|narrator|spoken (?:words|audio|dialogue|poem)|read[^.!?\n]*aloud)\b/i.test(supplied);
+}
+
+/** Preserve the person's answers without inferring device facts or advertising goals. */
+function buildWallpaperPrompt() {
+  const quote = (text) => String(text).split(/\r?\n/).map((line) => `> ${line}`).join('\n');
+  const detail = (dim) => {
+    if (delegated(dim.id)) return dim.delegate;
+    if (['missing', 'skipped'].includes(dimStatus(dim.id))) return `[${dim.label.toLowerCase()} — use any details in my original description; otherwise not specified]`;
+    return quote(val(dim.id));
+  };
+  const brief = [
+    'Create and deliver the finished animated phone wallpaper using the directions below. Use your available animation or video tools; do not respond by rewriting this as another prompt.',
+    '**Original idea (my words):**\n' + quote(state.description.trim()),
+    ...WALLPAPER_DIMS.map((dim) => `**${dim.label}:**\n${detail(dim)}`),
+    'Defaults only where I have not requested otherwise: silent animation, seamless looping, and no promotional text, logos, or call to action. Verify device support before choosing resolution, export format, or setup steps.',
+  ];
+  let out = '# Animated wallpaper request\n\n' + section('Animation brief', brief.join('\n\n'));
+  if (state.extraQA.length) out += section('Additional details', state.extraQA.map((answer) => `**${answer.q}**\n${quote(answer.a)}`).join('\n\n'));
+  out += section('What I want from you', wallpaperDeliverableBody());
+  out += section("Things I didn't specify", wallpaperUnspecifiedBody());
+  out += section('How to work with me', wallpaperRulesBody());
+  return out.trim() + '\n';
+}
+
 function buildStructuredPrompt() {
+  if (isWallpaper()) return buildWallpaperPrompt();
   if (isVideo()) return buildVideoPrompt();
   if (isExisting()) return buildChangeRequest();
   const title = deriveTitle();
@@ -1898,11 +2028,13 @@ function buildStructuredPrompt() {
 }
 /** The two sections that make or break the prompt. Written by us, and pinned back onto any AI rewrite. */
 function unspecifiedBody() {
+  if (isWallpaper()) return wallpaperUnspecifiedBody();
   if (isVideo()) return videoUnspecifiedBody();
   const unspec = unspecifiedDims();
   return unspec.length ? `I haven't decided on: ${unspec.map((d) => dimLabel(d).toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result. If anything above seems to settle one of these, treat it as open anyway; this list wins.` : '';
 }
 function rulesBody() {
+  if (isWallpaper()) return wallpaperRulesBody();
   if (isVideo()) return videoRulesBody();
   const rules = [];
   const skill = skillBody(); if (skill) rules.push(skill);
@@ -1968,7 +2100,7 @@ function pinSections(text) {
     const level = h[1].length;
     const sectionEnd = () => { let j = i; while (j + 1 < lines.length) { const n = /^(#{1,6})\s/.exec(lines[j + 1]); if (n && n[1].length <= level) break; j++; } return j; };
     // The saved audio choice also governs AI output; a rewrite cannot opt the person into narration.
-    if (isVideo() && !videoVoiceoverRequested() && /^(?:(?:optional|suggested)\s+)?(?:voice[ -]?over|narration|spoken (?:audio|script))(?:\b|$)/.test(key)) {
+    if (((isVideo() && !videoVoiceoverRequested()) || (isWallpaper() && !wallpaperNarrationRequested())) && /^(?:(?:optional|suggested)\s+)?(?:voice[ -]?over|narration|spoken (?:audio|script))(?:\b|$)/.test(key)) {
       i = sectionEnd();
       continue;
     }
@@ -2011,7 +2143,7 @@ const LOOKS_UP_RE = /\b(look(?:s|ed)? ?up|lookup|search(?:es)?|find(?:s)?|see(?:
 // Entering records is itself a source ("add a flight"); typing a query is not ("type a book title"), so bare "type" is out.
 const HAS_SOURCE_RE = /\b(add(?:s|ing)?|enter(?:s|ing)?|type in|creat(?:e|es|ing)|record(?:s|ing)?|log(?:s|ging)?|import(?:s|ed|ing)?|upload(?:s|ed|ing)?|fetch(?:es|ed|ing)?|pull(?:s|ed|ing)?|sync(?:s|ed|ing)?|scan(?:s|ned|ning)?|api|database|spreadsheet|csv|json|xml|file|paste[ds]?|manual(?:ly)? (?:input|entry|entered)|(?:from|via) (?:a|an|the)? ?(?:website|service|site|catalog(?:ue)?|library system|internet|open library|google books|goodreads|wikipedia))\b/i;
 function sanityHints() {
-  if (isVideo()) return [];
+  if (isMedia()) return [];
   const hints = [];
   if (isExisting()) {
     // The from-scratch data questions do not apply; the one thing that sinks a change request is the AI not seeing the code.
@@ -2068,6 +2200,25 @@ const VIDEO_POLISH_SYSTEM = `You are performing PromptForge's editing step. Rewr
 Use Markdown headings: title, Video-generation prompt, Scene outline, and Voiceover script only if the draft explicitly includes it. Make the scene outline practical with visuals, on-screen text and timing that fits the requested length. Preserve all limits and user wording that carries facts. Proposed creative choices must be labeled "(suggested)". Missing product names, claims, links, brand details and reference images must stay explicit placeholders; never invent them or claim assets were uploaded. Respect a no-voiceover answer, including text such as "no narration" even if a Yes option was chosen. Do not include a narration script when voiceover was skipped, undecided or delegated.
 
 Your role in this editing step is to prepare the text; the receiving assistant's role is to make the video. Do not copy your own text-only role into the brief or claim footage already exists. Tell the recipient to inspect provided assets and any project or repository it can access before requesting missing files. Do not invent extra deliverables such as voiced and unvoiced versions unless the person's answers request both. Do not prescribe unsupported model parameters or add software-building sections. Do not write "What I want from you", "Things I didn't specify", or "How to work with me": those production instructions are restored from the person's choices afterwards. Output only the production brief, with no commentary.`;
+
+const WALLPAPER_QUESTION_SYSTEM = `You help someone prepare instructions for another assistant to create and deliver a finished animated phone wallpaper. Find missing details that change the animation or its use on the intended phone. The recipient must produce the animation itself, not another prompt or planning document.
+
+Ask only about unknown scene or subject, exact phone model and OS version if known, home-screen or lock-screen use, visual style, movement, loop behaviour, duration, space for the clock and icons, or reference images and clips. Respect skipped answers and decisions delegated to the AI. Never invent a device resolution or supported format, and do not assume every phone supports the same wallpaper setup. Ask for necessary device details so the receiving assistant can verify support before export. References described here have not been uploaded by PromptForge.
+
+Default to silence and no advertising, text, logos, or call to action unless requested. Do not ask product-marketing questions about selling points, audiences, promotions, or calls to action. Do not ask about building software, code, frameworks, hosting, or databases. Preserve any explicit audio, text, or non-looping request without turning a default into a restriction.
+
+Use plain language, one topic per question, and 2–5 short options where helpful. Do not re-ask known answers. "covers" must be a wallpaper dimension id from STILL UNKNOWN, or "other" for an additional wallpaper detail. Return an empty list if the brief is sufficient.
+
+Return ONLY JSON in this shape:
+{"questions":[{"id":"short_snake_case","label":"2-3 word topic","question":"…","why":"one short sentence","options":["…"],"allowMultiple":false,"covers":"wallpaper dimension id or other"}]}`;
+
+const WALLPAPER_POLISH_SYSTEM = `You are performing PromptForge's editing step. Rewrite a person's brief into direct instructions for the receiving assistant to create, render, and deliver a finished animated phone wallpaper using its available tools. Open with that execution request. Never ask the recipient to return another prompt, storyboard, or animation plan as the final deliverable.
+
+Use Markdown headings: title and Animation brief, with concise subheadings only when useful. Preserve the exact scene, phone and intended screen use, visual style, movement, loop behaviour, duration, clock and icon space, supplied references, and restrictions. Quote wording that carries specific user requirements. Defaults are silence, seamless looping, and no advertising, text, logos, or call to action; explicit user requests override these defaults. Do not add narration, sound, sales messages, alternate versions, or device specifications the person did not request. Do not force a loop when a one-time animation was requested.
+
+Proposed creative choices must be labelled "(suggested)". Do not invent resolution, aspect ratio, supported formats, duration limits, or universal installation steps. Tell the receiving assistant to verify the exact phone model, OS version, and home-screen or lock-screen support before choosing export settings or giving setup steps, and to explain limitations with a workable alternative. Keep unknown device facts and essential references unresolved until verified. Do not claim assets were uploaded or inspected; tell the recipient to check accessible files before requesting missing references.
+
+Your role in this editing step is to prepare the text; the receiving assistant's role is to produce the animation. Do not copy your own text-only role into the brief, claim an animation already exists, prescribe unsupported tool parameters, or add software-building sections. Do not write "What I want from you", "Things I didn't specify", or "How to work with me": those production instructions are restored from the person's choices afterwards. Output only the production brief, with no commentary.`;
 
 // The shape QUESTION_SYSTEM asks for, enforced by the API (structured outputs / response_format) so a
 // stray sentence or a code fence can never turn a good question round into a fallback to built-in mode.
@@ -2336,18 +2487,19 @@ function qaSummary() {
 async function aiFetchQuestions() {
   const perRound = state.depth === 'quick' ? 3 : 5; // the built-in essentials already took a few slots in quick mode
   const sees = aiSeesCode() ? ' The AI that receives the prompt will have the project open, so do not ask what the app is or what it is built with.' : '';
-  const mode = isVideo() ? 'MODE: product video — prepare a video prompt, scene outline and optional voiceover script.\n\n'
+  const mode = isWallpaper() ? 'MODE: animated phone wallpaper — prepare instructions to create and deliver the finished animation. Ask only about wallpaper details, not advertising or software development.\n\n'
+    : isVideo() ? 'MODE: product video — prepare a video prompt, scene outline and optional voiceover script.\n\n'
     : isReviewOnly() ? `MODE: review of an existing app — the person wants suggestions, not a build. Ask what matters most to them, what they already know is wrong, what is off-limits, and how they want the findings. Do not propose improvements yourself.${sees}\n\n`
     : isExisting() ? `MODE: change to an existing app — ask about the existing code, what must keep working, and how it is run and tested; never about building it from scratch.${sees}\n\n` : '';
   const user = `${mode}PROJECT DESCRIPTION:\n${state.description}\n\nALREADY KNOWN:\n${knownSummary().join('\n') || '(nothing yet)'}\n\nSTILL UNKNOWN (dimension ids for "covers"):\n${unknownSummary().join('\n') || '(nothing)'}\n\nEARLIER Q&A:\n${qaSummary().join('\n\n') || '(none yet)'}\n\nThis is round ${state.aiRound + 1} of at most ${maxRounds()}. Ask at most ${perRound} questions this round; return an empty list if nothing important is missing.`;
   // Low effort: this is a short JSON list the user is waiting on, and adaptive thinking at full effort
   // is the slow part. The output cap leaves room for the model's thinking tokens, which count against it.
-  const { text: raw, truncated } = await API.chat({ system: isVideo() ? VIDEO_QUESTION_SYSTEM : QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low', schema: QUESTION_SCHEMA });
+  const { text: raw, truncated } = await API.chat({ system: isWallpaper() ? WALLPAPER_QUESTION_SYSTEM : isVideo() ? VIDEO_QUESTION_SYSTEM : QUESTION_SYSTEM, user, maxTokens: 8000, effort: 'low', schema: QUESTION_SCHEMA });
   if (truncated) throw new Error('the question list was cut off at the token limit');
   const j = extractJSON(raw);
   const qs = Array.isArray(j.questions) ? j.questions : [];
   // Drop questions mapped to the other workflow; treating them as "other" would still ask them.
-  return qs.filter((q) => q && q.question && (!DIM_BY_ID[q.covers] || activeDim(q.covers))).slice(0, isVideo() ? perRound : 6).map((q, i) => ({
+  return qs.filter((q) => q && q.question && (!DIM_BY_ID[q.covers] || activeDim(q.covers))).slice(0, isMedia() ? perRound : 6).map((q, i) => ({
     id: `ai_${state.aiRound + 1}_${i + 1}`,
     question: String(q.question).trim(),
     why: q.why ? String(q.why).trim() : '',
@@ -2555,17 +2707,18 @@ async function startInterview() {
   const text = $('#idea').value.trim();
   if (wordCount(text) < 3) { toast('Give me at least a sentence to work with'); $('#idea').focus(); return; }
   resetState();
-  state.mode = $('#mode button.on')?.dataset.mode === 'video' ? 'video' : 'software';
+  // The nested media choice selects its own interview without changing the software starting point.
+  state.mode = $('#mode button.on')?.dataset.mode === 'video' ? selectedMediaKind() : 'software';
   state.description = text;
   state.depth = settings.depth || 'quick';
   state.aiMode = aiEnabled();
   runDetection();
   // The switch on the first screen sets the starting point unless the description already made it clear.
   const wantsExisting = !!$('#mode button.on') && $('#mode button.on').dataset.mode === 'existing';
-  if (!isVideo() && wantsExisting && !isExisting()) {
+  if (!isMedia() && wantsExisting && !isExisting()) {
     state.answers.startingPoint = { choices: ['Adding to an existing project (describe below)'], text: '', source: 'user' };
     runDetection(); // detectors that depend on the mode (code access) can run now
-  } else if (!isVideo() && !wantsExisting && isExisting()) {
+  } else if (!isMedia() && !wantsExisting && isExisting()) {
     toast('Sounds like a change to an existing app — asking the questions for that. Not right? Change the Starting point answer in the brief.', '', 6000);
   }
   showScreen('refine');
@@ -2617,8 +2770,10 @@ function syncPromptTabs(polished = state.prompt.view === 'polished' && !!state.p
   $('#prompt-panel').setAttribute('aria-labelledby', active.id);
 }
 function renderResult() {
-  $('#result-heading').textContent = isVideo() ? 'Your video brief' : isReviewOnly() ? 'Your review request' : isExisting() ? 'Your change request' : 'Your app brief';
-  $('#result-help').textContent = isVideo()
+  $('#result-heading').textContent = isWallpaper() ? 'Your animated wallpaper brief' : isVideo() ? 'Your video brief' : isReviewOnly() ? 'Your review request' : isExisting() ? 'Your change request' : 'Your app brief';
+  $('#result-help').textContent = isWallpaper()
+    ? 'Review your brief, then copy it into an AI with animation tools to create the finished wallpaper.'
+    : isVideo()
     ? 'Review your brief, then copy it into a video-capable AI to create the finished video.'
     : 'Review your brief, then copy it into your AI coding tool to get started.';
   const p = state.prompt;
@@ -2636,7 +2791,7 @@ function renderResult() {
   const notice = $('#result-notice');
   if (!aiEnabled()) { notice.className = 'notice quiet'; notice.innerHTML = 'Your brief is ready. For an optional AI rewrite, <button class="btn sm ghost" type="button" data-open-settings style="display:inline-flex;padding:.1rem .35rem;color:var(--info)">connect a provider in Settings</button>.'; }
   else if (p.view === 'polished' && p.polished && p.truncated) { notice.className = 'notice warn'; notice.textContent = "The AI-polished prompt hit the model's output limit and may be cut off at the end. Check it, or polish again."; }
-  else if (p.view === 'polished' && p.polished) { notice.className = 'notice'; notice.textContent = isVideo() ? 'AI rewrite. Check any suggested scenes or wording against your product facts. The Structured tab keeps your answers and the built-in scene template.' : "AI rewrite. Anything marked (suggested) is the AI's idea, not yours — delete what you don't want. The Structured tab holds only what you said."; }
+  else if (p.view === 'polished' && p.polished) { notice.className = 'notice'; notice.textContent = isWallpaper() ? 'AI rewrite. Check suggested motion and export details against your preferences and phone. The Structured tab keeps your original answers.' : isVideo() ? 'AI rewrite. Check any suggested scenes or wording against your product facts. The Structured tab keeps your answers and the built-in scene template.' : "AI rewrite. Anything marked (suggested) is the AI's idea, not yours — delete what you don't want. The Structured tab holds only what you said."; }
   else notice.className = 'notice hidden';
 
   const hints = sanityHints();
@@ -2705,7 +2860,7 @@ async function polish() {
     if (!frame) frame = requestAnimationFrame(paint); // one repaint per frame, however fast tokens land
   };
   try {
-    const { text: raw, truncated } = await API.chat({ system: isVideo() ? VIDEO_POLISH_SYSTEM : POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000, onDelta, signal: ctl.signal });
+    const { text: raw, truncated } = await API.chat({ system: isWallpaper() ? WALLPAPER_POLISH_SYSTEM : isVideo() ? VIDEO_POLISH_SYSTEM : POLISH_SYSTEM, user: polishUserMessage(), maxTokens: 16000, onDelta, signal: ctl.signal });
     if (ctl.signal.aborted) return;
     if (!raw.trim()) throw new Error('empty response');
     state.prompt.polished = pinSections(cleanMarkdown(raw));
@@ -2805,7 +2960,7 @@ function loadHistory(id) {
   cancelPolish();
   resetState();
   Object.assign(state, {
-    id: e.id, mode: e.mode === 'video' ? 'video' : 'software', description: e.description || '', answers: e.answers || {}, extraQA: e.extraQA || [], asked: e.asked || [], aiQuestions: e.aiQuestions || [],
+    id: e.id, mode: ['video', 'wallpaper'].includes(e.mode) ? e.mode : 'software', description: e.description || '', answers: e.answers || {}, extraQA: e.extraQA || [], asked: e.asked || [], aiQuestions: e.aiQuestions || [],
     depth: e.depth || 'quick', prompt: Object.assign({ structured: '', polished: '', view: 'structured', edited: false }, e.prompt || {}),
   });
   // Repair our old generated instruction without overwriting any manually edited brief.
@@ -2972,18 +3127,28 @@ const VIDEO_EXAMPLES = [
   'A product demo for my foldable phone stand aimed at people working from home. I have product photos and want on-screen text with no voiceover.',
   'A short launch video for my gardening app, showing its planting reminders using screen recordings I can provide.',
 ];
+const WALLPAPER_EXAMPLES = [
+  'An animated wallpaper for my phone: a moonlit mountain lake with slow ripples and a seamless loop. Keep the top clear for the clock. No sound.',
+  'A dark abstract wallpaper with softly moving amber light, subtle motion, and space for my home-screen icons.',
+  'An animated phone background of a tiny spaceship drifting past a planet. A smooth loop with no flashes or text.',
+];
+function selectedMediaKind() { return $('#media-kind .selected')?.dataset.media === 'wallpaper' ? 'wallpaper' : 'video'; }
 function renderIdeaMode() {
   const selected = $('#mode button.on')?.dataset.mode || 'new';
-  const video = selected === 'video', existing = selected === 'existing';
+  const video = selected === 'video', wallpaper = video && selectedMediaKind() === 'wallpaper', existing = selected === 'existing';
   $$('#mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === selected)));
-  $('#idea-heading').textContent = video ? 'Tell me about the video you want.' : existing ? 'Tell me what you want to change.' : 'Tell me what you want to create.';
-  $('#idea-intro').textContent = video
+  $('#media-kind').classList.toggle('hidden', !video);
+  $$('#media-kind button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.media === selectedMediaKind())));
+  $('#idea-heading').textContent = wallpaper ? 'Picture your animated wallpaper.' : video ? 'Tell me about the video you want.' : existing ? 'Tell me what you want to change.' : 'Tell me what you want to create.';
+  $('#idea-intro').textContent = wallpaper
+    ? "Describe the scene and how it moves. I'll prepare a brief for an AI to create the animation, with your phone and screen layout in mind."
+    : video
     ? "Describe your product. I'll prepare a brief with scenes and optional narration for a video-capable AI to produce."
     : existing ? "Describe the app and what you'd like to improve — I'll ask about the details and turn it into a clear request for your AI coding tool."
-      : "An app, a change, or a product video. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.";
-  $('#idea').placeholder = video ? VIDEO_EXAMPLES[0] : existing ? EXAMPLES[3] : EXAMPLES[0];
-  $('#idea-label').textContent = video ? 'What are you promoting?' : existing ? 'What would you like to change?' : 'Describe your idea';
-  const examples = video ? VIDEO_EXAMPLES : existing ? EXAMPLES.slice(3) : EXAMPLES.slice(0, 3);
+      : "An app, a change, a product video, or an animated wallpaper. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.";
+  $('#idea').placeholder = wallpaper ? WALLPAPER_EXAMPLES[0] : video ? VIDEO_EXAMPLES[0] : existing ? EXAMPLES[3] : EXAMPLES[0];
+  $('#idea-label').textContent = wallpaper ? 'What would you like on your phone screen?' : video ? 'What are you promoting?' : existing ? 'What would you like to change?' : 'Describe your idea';
+  const examples = wallpaper ? WALLPAPER_EXAMPLES : video ? VIDEO_EXAMPLES : existing ? EXAMPLES.slice(3) : EXAMPLES.slice(0, 3);
   $('#examples').innerHTML = examples.map((e) => `<button type="button" class="chip example" data-ex="${esc(e)}">${esc(e.split(' ').slice(0, 7).join(' '))}…</button>`).join('');
 }
 function renderDepth() {
@@ -3003,6 +3168,12 @@ function init() {
   $('#examples').addEventListener('click', (e) => { const b = e.target.closest('[data-ex]'); if (b) { $('#idea').value = b.dataset.ex; $('#idea').focus(); } });
   $('#depth').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; settings.depth = b.dataset.depth; saveSettings(); renderDepth(); });
   $('#mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#mode button').forEach((x) => x.classList.toggle('on', x === b)); renderIdeaMode(); });
+  $('#media-kind').addEventListener('click', (e) => {
+    const button = e.target.closest('[data-media]'); if (!button) return;
+    // Preserve the written idea while selecting the interview for the next brief.
+    $$('#media-kind button').forEach((b) => b.classList.toggle('selected', b === button));
+    renderIdeaMode();
+  });
   $('#recent-list').addEventListener('click', (e) => { const l = e.target.closest('[data-load]'); if (l) return loadHistory(l.dataset.load); const d = e.target.closest('[data-del]'); if (d) deleteHistory(d.dataset.del); });
   $('#clear-history').addEventListener('click', () => {
     if (!confirm('Delete all saved briefs from this browser? This cannot be undone.')) return;
@@ -3157,7 +3328,7 @@ function init() {
   // Installed as an app (from a website), the page keeps opening offline. A double-clicked file has no service worker.
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
 
-  window.PromptForge = { state, DIMS, VIDEO_DIMS, activeDims, buildStructuredPrompt, settings, toList, deriveTitle, sortModels, localOriginHint, pinSections, PRESETS }; // handy for debugging / customizing / tests
+  window.PromptForge = { state, DIMS, VIDEO_DIMS, WALLPAPER_DIMS, activeDims, buildStructuredPrompt, settings, toList, deriveTitle, sortModels, localOriginHint, pinSections, PRESETS }; // handy for debugging / customizing / tests
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>
