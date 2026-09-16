@@ -20,7 +20,7 @@
   --border-strong: #3a4256;
   --text: #e8ebf2;
   --muted: #98a0b3;
-  --faint: #6b7385;
+  --faint: #929aad;
   --accent: #f5a524;
   --accent-2: #ffc75c;
   --accent-ink: #1a1200;
@@ -28,7 +28,7 @@
   --ok: #3fbf7f;
   --ok-soft: rgba(63,191,127,.15);
   --warn: #f0a530;
-  --bad: #e5533d;
+  --bad: #ff8875;
   --bad-soft: rgba(229,83,61,.14);
   --info: #5aa9ff;
   --info-soft: rgba(90,169,255,.14);
@@ -48,16 +48,16 @@
   --border-strong: #c6cbd8;
   --text: #171a21;
   --muted: #5b6375;
-  --faint: #8a91a3;
-  --accent: #a65b00;
+  --faint: #606779;
+  --accent: #985100;
   --accent-2: #874a00;
   --accent-ink: #ffffff;
   --accent-soft: rgba(217,123,0,.12);
-  --ok: #1f9d5c;
+  --ok: #14683a;
   --ok-soft: rgba(31,157,92,.12);
-  --bad: #d3452f;
+  --bad: #ad321f;
   --bad-soft: rgba(211,69,47,.1);
-  --info: #2f7fe0;
+  --info: #215fa9;
   --info-soft: rgba(47,127,224,.12);
   --shadow: 0 12px 34px rgba(25,35,60,.10);
   --shadow-sm: 0 3px 10px rgba(25,35,60,.08);
@@ -218,7 +218,7 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .recent { max-width: 920px; margin: 2rem auto 0; }
 .recent h3 { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 1rem; }
 .recent-list { display: grid; gap: .5rem; }
-.recent-item { display: flex; align-items: center; gap: .8rem; padding: .7rem .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-2); }
+.recent-item { display: flex; align-items: center; gap: .8rem; min-width: 0; padding: .7rem .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-2); }
 .recent-item .t { flex: 1; min-width: 0; }
 .recent-item .t b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 650; }
 .recent-item .t span { color: var(--faint); font-size: .8rem; }
@@ -257,7 +257,7 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .pill.skipped { background: var(--bad-soft); color: var(--bad); }
 .pill.ai { background: var(--ok-soft); color: var(--ok); }
 .brief-empty { color: var(--faint); font-size: .9rem; font-style: italic; }
-.brief-desc { font-size: .88rem; color: var(--muted); max-height: 120px; overflow: auto; padding: .5rem .7rem; background: var(--bg-3); border-radius: var(--radius-sm); border: 1px dashed var(--border-strong); margin-bottom: .7rem; white-space: pre-wrap; }
+.brief-desc { font-size: .88rem; color: var(--muted); max-height: 120px; overflow: auto; overflow-wrap: anywhere; padding: .5rem .7rem; background: var(--bg-3); border-radius: var(--radius-sm); border: 1px dashed var(--border-strong); margin-bottom: .7rem; white-space: pre-wrap; }
 
 /* ---------- Screen 3: Result ---------- */
 .result-heading { margin-bottom: 1.3rem; }
@@ -338,6 +338,12 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 
 footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-top: 3rem; }
 @media (max-width: 640px) {
+  button, summary { min-width: 44px; min-height: 44px; }
+  .btn.icon { width: 44px; height: 44px; flex-shrink: 0; }
+  .btn { white-space: normal; }
+  .inspiration summary { padding-block: .65rem; }
+  textarea, input, select, #idea, #prompt-edit { font-size: 16px; }
+  .field-row > input { min-width: 0; }
   .hero { margin-top: 0; margin-bottom: 1.2rem; }
   .hero p { font-size: .93rem; }
   .mode-choices { grid-template-columns: minmax(0, 1fr); gap: .5rem; margin-bottom: 1rem; }
@@ -346,7 +352,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
   .mode-copy strong { font-size: .91rem; }
   .mode-copy small { font-size: .79rem; }
   .idea-box { padding: 1rem; }
-  #idea { min-height: 145px; font-size: .94rem; }
+  #idea { min-height: 145px; }
   .idea-foot { gap: .8rem; }
   .idea-foot .controls { justify-content: space-between; width: 100%; }
   #start-btn { width: 100%; }
@@ -412,8 +418,8 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
         <div class="controls">
           <span class="depth-label">Question depth</span>
           <div class="depth" id="depth" role="group" aria-label="Interview depth">
-            <button type="button" data-depth="quick" class="on" title="Around 6–8 focused questions">Quick</button>
-            <button type="button" data-depth="thorough" title="Every question — best for bigger projects">Thorough</button>
+            <button type="button" data-depth="quick" class="on" aria-pressed="true" title="Around 6–8 focused questions">Quick</button>
+            <button type="button" data-depth="thorough" aria-pressed="false" title="Every question — best for bigger projects">Thorough</button>
           </div>
         </div>
         <button class="btn primary lg" id="start-btn" type="button">Start questions</button>
@@ -431,14 +437,14 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
     <div class="col-main">
       <div class="progress">
         <div class="bar" aria-hidden="true"><i id="bar-fill"></i></div>
-        <div class="strength"><span id="strength-pct">0%</span> <small id="strength-label">rough</small></div>
+        <div class="strength"><small>Brief coverage</small> <span id="strength-pct">0%</span> <small id="strength-label">few details</small></div>
       </div>
 
       <div class="card qcard" id="qcard">
         <div class="q-meta"><span id="q-pos">Question 1</span><span id="q-ai" class="ai-mark hidden">✦ tailored by AI</span></div>
         <h2 id="q-text" aria-live="polite">…</h2>
         <p class="why" id="q-why"></p>
-        <div class="chips" id="q-chips"></div>
+        <div class="chips" id="q-chips" role="group" aria-labelledby="q-text"></div>
         <label for="q-free" class="sr-only">Your answer</label>
         <textarea id="q-free" class="q-free" placeholder="Add detail in your own words (optional)"></textarea>
         <p class="q-hint" id="q-hint"></p>
@@ -470,11 +476,11 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
   <!-- ================= SCREEN 3: RESULT ================= -->
   <section class="screen two-col hidden" id="screen-result">
     <div class="col-main">
-      <div class="result-heading"><h1 id="result-heading">Your app brief</h1><p>Ready to copy. Review the details or edit the wording to make it yours.</p></div>
+      <div class="result-heading"><h1 id="result-heading">Your app brief</h1><p id="result-help">Review your brief, then copy it into your AI coding tool to get started.</p></div>
       <div class="result-toolbar">
-        <div class="tabs" role="tablist">
-          <button type="button" id="tab-structured" class="on" role="tab">Structured</button>
-          <button type="button" id="tab-polished" role="tab" disabled title="Add an API key in Settings to enable">✦ AI-polished</button>
+        <div class="tabs" role="tablist" aria-label="Prompt version">
+          <button type="button" id="tab-structured" class="on" role="tab" aria-selected="true" aria-controls="prompt-panel">Structured</button>
+          <button type="button" id="tab-polished" role="tab" aria-selected="false" aria-controls="prompt-panel" tabindex="-1" disabled title="Add an API key in Settings to enable">✦ AI-polished</button>
         </div>
         <span class="spacer" style="flex:1"></span>
         <button class="btn sm" id="edit-btn" type="button">✎ Edit</button>
@@ -482,11 +488,12 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
         <button class="btn sm primary" id="copy-btn" type="button">Copy prompt</button>
       </div>
       <div class="notice hidden" id="result-notice"></div>
+      <div class="notice warn hidden" id="history-save-warning" role="status">This browser couldn't save your prompt. Copy or download it before leaving this page.</div>
       <div class="notice warn hidden" id="sanity"></div>
       <div class="notice polish-status hidden" id="polish-status" role="status"><div class="spin"></div><span id="polish-status-text"></span><button class="btn ghost sm" id="polish-cancel" type="button">Skip — keep the structured prompt</button></div>
-      <div class="prompt-wrap">
+      <div class="prompt-wrap" id="prompt-panel" role="tabpanel" aria-labelledby="tab-structured">
         <pre id="prompt-view" tabindex="0"></pre>
-        <textarea id="prompt-edit" class="hidden" spellcheck="false"></textarea>
+        <textarea id="prompt-edit" class="hidden" spellcheck="false" aria-label="Edit your prompt"></textarea>
       </div>
       <div class="open-in">
         <span>Open in:</span>
@@ -501,11 +508,12 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
         <div class="score-ring">
           <div class="ring" id="ring"><span id="ring-pct">0%</span></div>
           <div>
-            <h3 style="margin:0">Brief strength</h3>
-            <div class="muted small" id="ring-label">rough</div>
+            <h3 style="margin:0">Brief coverage</h3>
+            <div class="muted small" id="ring-label">few details</div>
           </div>
         </div>
-        <ul class="coverage" id="coverage"></ul>
+        <p class="small muted" id="coverage-help">You can use your prompt at any score. Unanswered topics stay open for your AI.</p>
+        <ul class="coverage" id="coverage" aria-describedby="coverage-help"></ul>
         <div class="side-actions">
           <button class="btn" id="more-btn" type="button">Answer more questions</button>
           <button class="btn" id="polish-btn" type="button">✦ Polish with AI</button>
@@ -525,7 +533,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
 
     <div class="field">
       <label>AI assistance</label>
-      <div class="seg" id="provider-seg">
+      <div class="seg" id="provider-seg" role="group" aria-label="AI assistance">
         <button type="button" data-p="none">Off (built-in only)</button>
         <button type="button" data-p="anthropic">Claude (Anthropic)</button>
         <button type="button" data-p="openai">OpenAI</button>
@@ -616,7 +624,7 @@ const store = {
   get(key, fallback) {
     try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
   },
-  set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* storage may be unavailable (private mode) */ } },
+  set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch { return false; } },
   del(key) { try { localStorage.removeItem(key); } catch { /* ignore */ } },
 };
 
@@ -1210,6 +1218,7 @@ const state = {
   depth: settings.depth || 'quick',
   answers: {},        // dimId -> { choices:[], text:'', source:'user'|'detected'|'delegate'|'skipped', note?, via?, q? }
   questionDrafts: {}, // Unsubmitted form values retained while navigating Back; never part of the brief.
+  historySaveFailed: false, // Applies only to the brief currently in memory.
   extraQA: [],        // AI questions that didn't map onto a dimension: { q, a }
   asked: [],          // question ids in the order they were asked (dims and ai_* ids)
   current: null,      // id of the question on screen
@@ -1223,7 +1232,7 @@ const state = {
 
 function resetState() {
   Object.assign(state, {
-    id: uid(), mode: 'software', screen: 'describe', description: '', answers: {}, questionDrafts: {}, extraQA: [], asked: [], current: null,
+    id: uid(), mode: 'software', screen: 'describe', description: '', answers: {}, questionDrafts: {}, historySaveFailed: false, extraQA: [], asked: [], current: null,
     aiQuestions: [], aiRound: 0, aiMode: false, aiDone: false, single: false,
     prompt: { structured: '', polished: '', view: 'structured', edited: false },
   });
@@ -1439,7 +1448,7 @@ function strength() {
   let pct = total ? (got / total) * 100 : 0;
   pct += Math.min(15, state.extraQA.length * 5);
   pct = Math.max(0, Math.min(100, Math.round(pct)));
-  const label = pct < 35 ? 'rough' : pct < 60 ? 'decent' : pct < 88 ? 'solid' : 'excellent';
+  const label = pct < 35 ? 'few details' : pct < 60 ? 'partial coverage' : pct < 88 ? 'broad coverage' : 'detailed coverage';
   return { pct, label };
 }
 /* ---------- 5. Structured prompt builder ---------- */
@@ -2430,7 +2439,11 @@ function showQuestion(id) {
   chips.innerHTML = opts.map((o) => `<button type="button" class="chip" data-v="${esc(o)}">${esc(o)}</button>`).join('');
   chips.classList.toggle('hidden', !opts.length);
   const sel = pre ? pre.choices : existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.choices || []) : [];
-  $$('.chip', chips).forEach((c) => { if (sel.includes(c.dataset.v)) c.classList.add('selected'); });
+  $$('.chip', chips).forEach((c) => {
+    const selected = sel.includes(c.dataset.v);
+    c.classList.toggle('selected', selected);
+    c.setAttribute('aria-pressed', String(selected));
+  });
 
   const free = $('#q-free');
   free.value = pre ? pre.text : existing && existing.source !== 'skipped' && existing.source !== 'delegate' ? (existing.text || '') : '';
@@ -2444,7 +2457,11 @@ function showQuestion(id) {
   $('#finish-btn').textContent = state.single ? '← Back to my prompt' : "I've said enough — build my prompt ✓";
   hideThinking();
   renderBrief();
-  if (!opts.length) setTimeout(() => free.focus(), 50); else chips.querySelector('.chip') && setTimeout(() => free.blur(), 0);
+  // A late question callback must not steal focus from Settings or a newer screen/question.
+  setTimeout(() => {
+    if (settingsIsOpen() || state.screen !== 'refine' || state.current !== id) return;
+    if (!opts.length) free.focus(); else free.blur();
+  }, opts.length ? 0 : 50);
 }
 function readAnswer() {
   const q = questionById(state.current);
@@ -2532,6 +2549,7 @@ function onChipClick(e) {
     chips.forEach((c) => c.classList.remove('selected'));
     if (!was) chip.classList.add('selected');
   }
+  chips.forEach((c) => c.setAttribute('aria-pressed', String(c.classList.contains('selected'))));
 }
 async function startInterview() {
   const text = $('#idea').value.trim();
@@ -2588,16 +2606,29 @@ async function buildResult() {
   saveHistory();
   if (aiEnabled() && settings.autoPolish && !state.prompt.polished) polish();
 }
+function syncPromptTabs(polished = state.prompt.view === 'polished' && !!state.prompt.polished) {
+  const active = polished ? $('#tab-polished') : $('#tab-structured');
+  const tabStop = active.disabled ? $('#tab-structured') : active;
+  for (const tab of [$('#tab-structured'), $('#tab-polished')]) {
+    tab.classList.toggle('on', tab === active);
+    tab.setAttribute('aria-selected', String(tab === active));
+    tab.tabIndex = tab === tabStop ? 0 : -1;
+  }
+  $('#prompt-panel').setAttribute('aria-labelledby', active.id);
+}
 function renderResult() {
   $('#result-heading').textContent = isVideo() ? 'Your video brief' : isReviewOnly() ? 'Your review request' : isExisting() ? 'Your change request' : 'Your app brief';
+  $('#result-help').textContent = isVideo()
+    ? 'Review your brief, then copy it into a video-capable AI to create the finished video.'
+    : 'Review your brief, then copy it into your AI coding tool to get started.';
   const p = state.prompt;
   const text = p.view === 'polished' && p.polished ? p.polished : p.structured;
+  $('#history-save-warning').classList.toggle('hidden', !state.historySaveFailed);
   $('#prompt-view').innerHTML = highlightMd(text);
   $('#prompt-edit').value = text;
   $('#prompt-view').classList.remove('hidden'); $('#prompt-edit').classList.add('hidden'); $('#edit-btn').textContent = '✎ Edit';
-  $('#tab-structured').classList.toggle('on', p.view !== 'polished' || !p.polished);
-  $('#tab-polished').classList.toggle('on', p.view === 'polished' && !!p.polished);
   $('#tab-polished').disabled = !p.polished;
+  syncPromptTabs();
   $('#tab-polished').title = p.polished ? '' : (aiEnabled() ? 'Click "Polish with AI" to generate' : 'Add an AI provider in Settings to enable');
   $('#polish-btn').classList.toggle('hidden', false);
   $('#polish-btn').textContent = p.polished ? '✦ Polish again' : '✦ Polish with AI';
@@ -2624,7 +2655,8 @@ function renderResult() {
     const icon = cls === 'ok' ? '✓' : cls === 'delegate' ? '≈' : st === 'skipped' ? '–' : '○';
     const v = guess ? 'from your description' : st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
     const action = cls === 'ok' ? 'edit' : guess ? 'confirm' : 'answer';
-    cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(dimLabel(d))}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${action}</button></li>`);
+    const actionLabel = action[0].toUpperCase() + action.slice(1) + ' ' + dimLabel(d);
+    cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(dimLabel(d))}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" aria-label="${esc(actionLabel)}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${action}</button></li>`);
   }
   $('#coverage').innerHTML = cov.join('');
 }
@@ -2640,6 +2672,7 @@ function setPolishing(on) {
   const b = $('#polish-btn');
   b.disabled = on; b.innerHTML = on ? '<span class="spin"></span> Polishing…' : (state.prompt.polished ? '✦ Polish again' : '✦ Polish with AI');
   $('#tab-polished').disabled = on || !state.prompt.polished;
+  syncPromptTabs($('#tab-polished').classList.contains('on'));
   clearInterval(polishTimer); polishTimer = null;
   if (on) { polishStarted = Date.now(); polishWords = -1; renderPolishStatus(); polishTimer = setInterval(renderPolishStatus, 1000); }
   $('#polish-status').classList.toggle('hidden', !on);
@@ -2665,7 +2698,7 @@ async function polish() {
   };
   const onDelta = (text) => {
     if (ctl.signal.aborted || !$('#prompt-edit').classList.contains('hidden')) return; // never fight the editor
-    if (!shown) { shown = true; state.prompt.view = 'polished'; $('#tab-polished').classList.add('on'); $('#tab-structured').classList.remove('on'); }
+    if (!shown) { shown = true; state.prompt.view = 'polished'; syncPromptTabs(true); }
     if (state.prompt.view !== 'polished') return; // the reader switched back to the structured tab
     latest = stripOpenFence(text);
     polishWords = wordCount(latest); renderPolishStatus();
@@ -2722,6 +2755,7 @@ function toggleEdit() {
     // Editing takes ownership of the text; a late AI response must not replace it.
     cancelPolish();
     if (state.prompt.view === 'polished' && !state.prompt.polished) state.prompt.view = 'structured';
+    syncPromptTabs();
     ed.dataset.promptView = state.prompt.view;
     ed.value = currentPromptText(); ed.classList.remove('hidden'); view.classList.add('hidden'); btn.textContent = '✓ Done'; ed.focus();
   }
@@ -2749,7 +2783,9 @@ function saveHistory() {
   };
   const i = list.findIndex((x) => x.id === state.id);
   if (i >= 0) list[i] = entry; else list.unshift(entry);
-  store.set('pf_history', list.slice(0, 20));
+  const saved = store.set('pf_history', list.slice(0, 20));
+  state.historySaveFailed = !saved;
+  $('#history-save-warning').classList.toggle('hidden', saved);
   renderRecent();
 }
 /** Update only our generated footer; normalizing the whole draft can remove answer fields. */
@@ -2797,11 +2833,23 @@ function renderRecent() {
       <button class="btn icon ghost sm" type="button" data-del="${esc(e.id)}" aria-label="Delete">✕</button>
     </div>`).join('');
 }
-function deleteHistory(id) { store.set('pf_history', readHistory().filter((x) => x.id !== id)); renderRecent(); }
+function deleteHistory(id) {
+  const list = readHistory(), entry = list.find((x) => x.id === id);
+  if (!entry || !confirm(`Delete the saved brief “${entry.title || 'Untitled'}”? This cannot be undone.`)) return;
+  if (!store.set('pf_history', list.filter((x) => x.id !== id))) toast('Could not delete this brief. Browser storage is unavailable; try again.', 'bad');
+  renderRecent();
+}
 
 /* --- Settings modal --- */
 const draft = {};
 let settingsCtl = null;
+let settingsOpener = null;
+let settingsBackground = [];
+function settingsIsOpen() { return !$('#settings-modal').classList.contains('hidden'); }
+function settingsFocusTargets() {
+  return $$('button, input, select, textarea, a[href], [tabindex]', $('#settings-modal'))
+    .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
+}
 function cancelSettingsRequest() {
   if (settingsCtl) { settingsCtl.abort(); settingsCtl = null; }
   $('#s-fetch-models').disabled = false; $('#s-fetch-models').textContent = 'Fetch list';
@@ -2816,16 +2864,35 @@ function clearDraftCredentials() {
   $('#s-key').type = 'password'; $('#s-key-toggle').textContent = 'Show';
 }
 function openSettings() {
+  if (settingsIsOpen()) return;
+  settingsOpener = document.activeElement;
   cancelSettingsRequest();
   Object.assign(draft, settings);
   $('#s-key').type = 'password'; $('#s-key-toggle').textContent = 'Show';
   $('#settings-modal').classList.remove('hidden');
   renderSettings();
   $('#s-test-result').textContent = '';
+  // Keep background controls out of keyboard and assistive-technology navigation while modal.
+  settingsBackground = [$('.topbar'), $('main')].map((element) => ({ element, inert: element.inert }));
+  settingsBackground.forEach(({ element }) => { element.inert = true; });
+  $('#settings-close').focus();
 }
-function closeSettings() { cancelSettingsRequest(); $('#settings-modal').classList.add('hidden'); }
+function closeSettings() {
+  if (!settingsIsOpen()) return;
+  cancelSettingsRequest(); $('#settings-modal').classList.add('hidden');
+  settingsBackground.forEach(({ element, inert }) => { element.inert = inert; });
+  settingsBackground = [];
+  // Async result rendering can replace the opener; fall back to the persistent Settings button.
+  const opener = settingsOpener;
+  settingsOpener = null;
+  if (opener?.isConnected && !opener.disabled && opener.getClientRects().length) opener.focus();
+  else $('#settings-btn').focus();
+}
 function renderSettings() {
-  $$('#provider-seg button').forEach((b) => b.classList.toggle('on', b.dataset.p === draft.provider));
+  $$('#provider-seg button').forEach((b) => {
+    const selected = b.dataset.p === draft.provider;
+    b.classList.toggle('on', selected); b.setAttribute('aria-pressed', String(selected));
+  });
   const p = draft.provider;
   $('#provider-fields').classList.toggle('hidden', p === 'none');
   $('#field-preset').classList.toggle('hidden', p !== 'custom');
@@ -2911,7 +2978,7 @@ function renderIdeaMode() {
   $$('#mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === selected)));
   $('#idea-heading').textContent = video ? 'Tell me about the video you want.' : existing ? 'Tell me what you want to change.' : 'Tell me what you want to create.';
   $('#idea-intro').textContent = video
-    ? "Describe your product. I'll turn the details into a video prompt, a scene outline, and an optional voiceover script."
+    ? "Describe your product. I'll prepare a brief with scenes and optional narration for a video-capable AI to produce."
     : existing ? "Describe the app and what you'd like to improve — I'll ask about the details and turn it into a clear request for your AI coding tool."
       : "An app, a change, or a product video. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.";
   $('#idea').placeholder = video ? VIDEO_EXAMPLES[0] : existing ? EXAMPLES[3] : EXAMPLES[0];
@@ -2919,19 +2986,29 @@ function renderIdeaMode() {
   const examples = video ? VIDEO_EXAMPLES : existing ? EXAMPLES.slice(3) : EXAMPLES.slice(0, 3);
   $('#examples').innerHTML = examples.map((e) => `<button type="button" class="chip example" data-ex="${esc(e)}">${esc(e.split(' ').slice(0, 7).join(' '))}…</button>`).join('');
 }
+function renderDepth() {
+  $$('#depth button').forEach((b) => {
+    const selected = b.dataset.depth === (settings.depth || 'quick');
+    b.classList.toggle('on', selected); b.setAttribute('aria-pressed', String(selected));
+  });
+}
 function init() {
   refreshAiBadge();
   renderRecent();
   renderIdeaMode();
-  $$('#depth button').forEach((b) => b.classList.toggle('on', b.dataset.depth === (settings.depth || 'quick')));
+  renderDepth();
 
   $('#start-btn').addEventListener('click', startInterview);
   $('#idea').addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') startInterview(); });
   $('#examples').addEventListener('click', (e) => { const b = e.target.closest('[data-ex]'); if (b) { $('#idea').value = b.dataset.ex; $('#idea').focus(); } });
-  $('#depth').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; settings.depth = b.dataset.depth; saveSettings(); $$('#depth button').forEach((x) => x.classList.toggle('on', x === b)); });
+  $('#depth').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; settings.depth = b.dataset.depth; saveSettings(); renderDepth(); });
   $('#mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#mode button').forEach((x) => x.classList.toggle('on', x === b)); renderIdeaMode(); });
   $('#recent-list').addEventListener('click', (e) => { const l = e.target.closest('[data-load]'); if (l) return loadHistory(l.dataset.load); const d = e.target.closest('[data-del]'); if (d) deleteHistory(d.dataset.del); });
-  $('#clear-history').addEventListener('click', () => { store.del('pf_history'); renderRecent(); });
+  $('#clear-history').addEventListener('click', () => {
+    if (!confirm('Delete all saved briefs from this browser? This cannot be undone.')) return;
+    if (!store.set('pf_history', [])) toast('Could not clear saved briefs. Browser storage is unavailable; try again.', 'bad');
+    renderRecent();
+  });
 
   $('#q-chips').addEventListener('click', onChipClick);
   $('#q-next').addEventListener('click', onNext);
@@ -2951,6 +3028,16 @@ function init() {
 
   $('#tab-structured').addEventListener('click', () => { state.prompt.view = 'structured'; renderResult(); });
   $('#tab-polished').addEventListener('click', () => { if (state.prompt.polished) { state.prompt.view = 'polished'; renderResult(); } });
+  $('.tabs').addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const tabs = $$('.tabs [role="tab"]').filter((tab) => !tab.disabled);
+    const current = tabs.indexOf(e.target);
+    if (current < 0) return;
+    e.preventDefault();
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1
+      : (current + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[next].click(); tabs[next].focus();
+  });
   $('#copy-btn').addEventListener('click', async () => {
     const copied = await copyText(currentPromptText());
     toast(copied ? 'Prompt copied to clipboard' : 'Copy failed — select the text and copy manually', copied ? 'ok' : 'bad');
@@ -2978,7 +3065,18 @@ function init() {
   $('#settings-close').addEventListener('click', closeSettings);
   $('#settings-cancel').addEventListener('click', closeSettings);
   $('#settings-modal').addEventListener('click', (e) => { if (e.target === $('#settings-modal')) closeSettings(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#settings-modal').classList.contains('hidden')) closeSettings(); });
+  document.addEventListener('keydown', (e) => {
+    if (!settingsIsOpen()) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeSettings(); return; }
+    if (e.key !== 'Tab') return;
+    const targets = settingsFocusTargets();
+    const first = targets[0], last = targets[targets.length - 1];
+    if (!first) return;
+    const focused = document.activeElement;
+    if (!targets.includes(focused) || (e.shiftKey ? focused === first : focused === last)) {
+      e.preventDefault(); (e.shiftKey ? last : first).focus();
+    }
+  });
   $('#s-preset').innerHTML = PRESETS.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join('');
   $('#provider-seg').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -3048,9 +3146,11 @@ function init() {
     readSettingsForm();
     if (draft.provider === 'custom' && !/^https?:\/\//i.test(draft.baseUrl)) { toast('Enter a base URL that starts with http:// or https://', 'bad'); return; }
     if (keyNeeded() && !draft.apiKey) { toast(keyMissingMessage(), 'bad', 6000); return; }
-    Object.assign(settings, draft); saveSettings(); closeSettings();
-    toast(aiEnabled() ? 'AI assistance is on' : 'Built-in mode', 'ok');
+    Object.assign(settings, draft); saveSettings();
+    // Rebuild the result before restoring focus, since it may replace the Settings opener.
     if (state.screen === 'result') renderResult();
+    closeSettings();
+    toast(aiEnabled() ? 'AI assistance is on' : 'Built-in mode', 'ok');
   });
   $('#s-wipe').addEventListener('click', () => { if (confirm('Delete your API key, settings, and saved briefs from this browser?')) wipeAll(); });
 

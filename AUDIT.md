@@ -1,5 +1,38 @@
 # PromptForge audits
 
+## September 16, 2026
+
+Used the installed UXCritique and UIAudit guidance for two independent assessments of Describe, Refine, Results, and Settings, then applied HardenUI and Polish to the confirmed findings. Preserved the three workflows, existing amber identity, light/dark themes, single-file architecture, and optional AI model. No dependencies were added.
+
+### Assessment before repairs
+
+The UX review scored **28/40 (Good)**: status 3, plain language 3, user control 2, consistency 3, error prevention 3, recognition 3, efficiency 3, minimalism 3, recovery 3, and help 2. The technical UI review scored **15/20 (Good)**: accessibility 2, performance 3, responsiveness 3, theming 3, and integrity 4. These are review judgments, not certification or performance benchmarks.
+
+The three intent choices, one-question interview with live brief, and direct copy/edit actions already worked well. The main gaps affected keyboard users, people reading low-contrast secondary text, mobile users, and newcomers interpreting the score as a completion requirement.
+
+The plugins' Impeccable context, detector, and critique-storage helpers could not run because engine 0.1.5 was unavailable and its cache directory could not be created. Findings therefore came from source inspection, independent browser reviews, and focused browser tests. The deterministic detector was **unavailable**, not a clean scan. This report records the findings in place of the unavailable critique snapshot.
+
+### Confirmed repairs
+
+| Area | Confirmed problem | Result |
+| --- | --- | --- |
+| Settings keyboard navigation | Focus remained behind the modal, escaped its controls, or disappeared after saving from the result link. A delayed question callback could steal focus. | Opening focuses the dialog; Tab stays inside; background controls are inert. Closing restores the opener or the persistent Settings button after result rendering. Late question focus is guarded. |
+| Control semantics | Choice, depth, and provider selections were visual only; result tabs lacked selection/panel relationships and keyboard navigation; the prompt editor had no accessible name. | Selected states, grouped choices, topic-specific coverage actions, a named editor, and keyboard-operable tabs expose the same state as the visible UI. |
+| Contrast | Faint text failed 4.5:1 in both themes; several semantic badge colors also failed. | Adjusted text and badge colors while retaining the identity. The dark skipped/error badge improved from 3.69:1 to 5.91:1; checked light badges improved from 2.69–3.99:1 to 4.67–5.30:1. |
+| Mobile layout | Small controls and editing text were difficult to use; unbroken content could overflow. | Phone-width buttons/disclosures have 44px minimum targets, form text is at least 16px, and long descriptions/history entries fit. The 44px target is an ergonomic choice, not a claim that WCAG AA requires that size. |
+| Score and next step | “Brief strength” sounded like a quality/completion grade, and the handoff after generating a brief was unclear. | “Brief coverage” explains that any score is usable. Results direct app requests to a coding tool and video briefs to a video-capable AI to produce the finished video. The scoring formula is unchanged. |
+| Saving and deletion | Failed browser-storage writes silently appeared successful; deleting one or all saved briefs was immediate. | A persistent warning offers copy/download recovery until saving succeeds. The warning belongs to the current brief. Deletion requires confirmation and reports storage failures. |
+
+### Verification
+
+Added 19 focused regression checks: 9 accessibility, 6 appearance, and 4 storage/deletion checks. Baseline comparisons reproduced the affected behaviors before repair; the new suites pass after repair. The storage suite also checks that a failed-save warning does not leak into another saved brief.
+
+The complete suite passed **155 tests** with installed Chrome (`PF_BROWSER_CHANNEL=chrome`), including all prior interview, AI, video, delivery, and offline-cache checks. `git diff --check` passed. The three new suites are included in `npm test`.
+
+A single batched visual check covered **20 layout states** across desktop, 390px and 320px widths, light/dark themes, and Describe/Refine/Results/expanded Settings. No horizontal overflow or page errors were found. An independent final review found and rechecked the Settings Save focus issue; no review findings remain outstanding.
+
+Checks use isolated Chrome contexts and mocked AI responses. No paid AI calls were made. Real-device touch behavior, screen-reader speech output, and formal WCAG conformance were not tested. No performance profiling was performed.
+
 ## September 12, 2026
 
 Re-read the updated workflow guidance and audited the current software/video interviews, prompt output, optional AI settings and responses, history compatibility, local delivery, and service worker. Kept the single-file app and existing dependencies.

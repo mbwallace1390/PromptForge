@@ -1,6 +1,6 @@
 # PromptForge
 
-Turns a rough, plain-English idea into a detailed AI prompt for a new app or tool, a change to an existing app, or a product video. The app asks follow-up questions one at a time and assembles a structured prompt with a strength score and a coverage checklist.
+Turns a rough, plain-English idea into a detailed AI prompt for a new app or tool, a change to an existing app, or a product video. The app asks follow-up questions one at a time and assembles a structured prompt with a brief coverage score and checklist. The score shows how much detail you supplied; your prompt is usable at any score.
 
 Everything is in one file: `promptforge.html`. No install, no server, no build step.
 
@@ -54,7 +54,7 @@ Keys are stored only in localStorage and sent only to the chosen provider — fi
 
 Changing the provider, service, or custom address clears the previous key and model. Enter the key for the new service before testing or saving. Testing a connection or fetching models does not apply unsaved settings.
 
-Prompt edits are saved as you type. Returning from a coverage question without answering keeps your edited prompt; submitting a changed answer rebuilds it from the brief. Editing during an AI polish stops that rewrite so it cannot replace your words.
+Prompt edits are saved as you type. If browser storage is unavailable or full, a persistent notice asks you to copy or download the prompt before leaving. Deleting saved briefs requires confirmation. Returning from a coverage question without answering keeps your edited prompt; submitting a changed answer rebuilds it from the brief. Editing during an AI polish stops that rewrite so it cannot replace your words.
 
 ## Checking changes
 
