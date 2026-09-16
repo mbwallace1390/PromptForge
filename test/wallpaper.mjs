@@ -108,11 +108,12 @@ try {
   await test('early finish exports a silent finished wallpaper request with pending wording', async page => {
     await begin(page);
     assert.equal(await page.evaluate(() => PromptForge.state.mode), 'wallpaper');
-    assert.equal(await page.evaluate(() => PromptForge.state.current), 'wallpaperSubject');
-    await page.fill('#q-free', 'Only the reflection should move; keep the clock clear and do not flash.');
+    assert.equal(await page.evaluate(() => PromptForge.state.current), 'wallpaperDevice');
+    await page.fill('#q-free', 'My Samsung phone lock screen; keep the clock clear and do not flash.');
     const prompt = await finish(page);
     assertArtifact(prompt);
-    assert.match(prompt, /Only the reflection should move; keep the clock clear and do not flash\./);
+    assert.match(prompt, /My Samsung phone lock screen; keep the clock clear and do not flash\./);
+    assert.match(prompt, /a copper moon above a dark lake\./);
     assert.match(prompt, /silent|no audio/i);
     assert.match(prompt, /(?:no|do not add|without)[^.\n]{0,80}(?:advertis|promotion|call.to.action)/i);
     assert.doesNotMatch(prompt, /## (?:Voiceover script|Tech stack|Call to action)/i);
@@ -120,7 +121,7 @@ try {
 
   await test('thorough wallpaper interview covers its eight topics and preserves exact directions', async page => {
     await page.click('[data-depth="thorough"]');
-    await begin(page);
+    await begin(page, answers.wallpaperSubject);
     const seen = [];
     for (let count = 0; count < 10; count++) {
       const { screen, current } = await page.evaluate(() => PromptForge.state);
@@ -131,7 +132,7 @@ try {
       await page.fill('#q-free', answers[current]);
       await next(page);
     }
-    assert.deepEqual([...seen].sort(), [...ids].sort());
+    assert.deepEqual([...seen].sort(), ids.filter(id => id !== 'wallpaperSubject').sort(), 'The opening subject plus seven questions must cover all eight topics');
     assert.equal(await page.locator('#screen-result').isVisible(), true);
     const prompt = await page.locator('#prompt-view').textContent();
     for (const answer of Object.values(answers)) assert.ok(prompt.includes(answer), `Lost supplied direction: ${answer}`);
@@ -141,16 +142,28 @@ try {
     assert.doesNotMatch(prompt, /works on (?:every|all|any) (?:phone|device)/i);
     const coverage = await page.locator('#coverage [data-ask]').evaluateAll(items => items.map(item => item.dataset.ask));
     assert.ok(coverage.length && coverage.every(id => ids.includes(id)), 'Coverage must use only wallpaper topics');
+    assert.ok(coverage.includes('wallpaperSubject'), 'The opening subject must remain editable');
+    await page.locator('#coverage [data-ask="wallpaperSubject"]').click();
+    assert.equal(await page.inputValue('#q-free'), answers.wallpaperSubject);
+    const editedSubject = answers.wallpaperSubject + ' Keep the moon below the clock.';
+    await page.fill('#q-free', editedSubject);
+    await next(page);
+    const revised = await page.locator('#prompt-view').textContent();
+    assert.ok(revised.includes(editedSubject), 'Editing the opening subject must update the prompt');
+    for (const answer of Object.values(answers)) assert.ok(revised.includes(answer), `Editing the subject lost a supplied direction: ${answer}`);
   });
 
   await test('Back preserves an unconfirmed wallpaper answer until it is accepted', async page => {
     await begin(page);
-    await page.fill('#q-free', answers.wallpaperSubject);
+    assert.equal(await page.evaluate(() => PromptForge.state.current), 'wallpaperDevice');
+    await page.fill('#q-free', answers.wallpaperDevice);
     await next(page);
     const second = await page.evaluate(() => PromptForge.state.current);
-    const draft = 'My Samsung phone lock screen; preserve this draft.';
+    assert.equal(second, 'wallpaperStyle');
+    const draft = 'Painted in midnight blue and copper; preserve this draft.';
     await page.fill('#q-free', draft);
     await page.click('#q-back');
+    assert.equal(await page.evaluate(() => PromptForge.state.current), 'wallpaperDevice');
     assert.equal(await page.evaluate(id => PromptForge.state.answers[id], second), undefined);
     await next(page);
     assert.equal(await page.evaluate(() => PromptForge.state.current), second);

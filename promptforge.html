@@ -887,7 +887,7 @@ const DIMS = [
   {
     id: 'changeKind', label: 'Kind of change', priority: 'essential', type: 'single',
     when: (s) => isExisting(s),
-    question: 'Do you know what you want changed, or do you want it reviewed first?',
+    question: 'Should the AI make your requested changes, review the app, or do both?',
     why: 'A specific change and an open review are different jobs: one edits, the other suggests and waits.',
     options: ['I know what I want changed (a feature, a fix, an upgrade)', "Review it and suggest improvements — I'm not sure what's needed", 'Both: make these changes, and tell me what else you would improve'],
     detect(text) {
@@ -978,9 +978,9 @@ const DIMS = [
     delegate: 'Choose the platform(s) that make the most sense for this and tell me why.',
   },
   {
-    id: 'purpose', label: 'Goal', priority: 'essential', type: 'text', big: true,
-    question: (s) => (isExisting(s) ? "Why this change — what's wrong or missing today?" : "What's the main problem this solves, or the main thing it should help someone do?"),
-    why: "The clearer the goal, the better the AI's decisions on everything you didn't spell out.",
+    id: 'purpose', label: 'Goal', priority: 'important', type: 'text', big: true,
+    question: 'Is there any extra background that would help the AI understand your request?',
+    why: 'Your opening brief is already included. Add context you have not covered, or press Next to keep going.',
     placeholder: (s) => (isExisting(s) ? 'e.g. Members keep asking for an export; the flight list gets slow past 500 entries.' : 'e.g. Right now I keep flight notes in a paper notebook and never know which batteries are getting old.'),
     when: (s) => wordCount(s.description) < 45 || !PURPOSE_RE.test(s.description),
   },
@@ -1007,10 +1007,10 @@ const DIMS = [
     id: 'coreFeatures', label: (s) => (isReviewOnly(s) ? 'Known problems' : isExisting(s) ? 'What should change' : 'Must-have features'),
     priority: (s) => (isReviewOnly(s) ? 'optional' : 'essential'), // a review is asked for because the person does not know what should change
     type: 'text', big: true,
-    question: (s) => (isReviewOnly(s) ? 'Anything you already know needs fixing or changing?' : isExisting(s) ? 'What should be different when this is done?' : 'What must the first version be able to do?'),
-    why: (s) => (isReviewOnly(s) ? 'Optional. Known problems go to the top of the list.' : isExisting(s) ? "One change per line. This is the AI's checklist — anything not here stays as it is." : "List the essentials, one per line. This becomes the AI's checklist — anything not here is optional."),
+    question: (s) => (isReviewOnly(s) ? 'Anything you already know needs fixing or changing?' : isExisting(s) ? 'Are there any extra details to add to the changes you described?' : 'What extra details should the first version include?'),
+    why: (s) => (isReviewOnly(s) ? 'Optional. Known problems go to the top of the list.' : 'Your opening requirements are already included. Add only missing details, one per line, or press Next to keep your brief as it is.'),
     placeholder: (s) => (isExisting(s) ? 'e.g.\nAdd a dark-mode toggle in Settings\nExport all flights to CSV\nFix the crash when a battery has no name' : 'e.g.\nLog a flight with date, model and duration\nShow total flights per model\nExport everything to CSV'),
-    hint: (s) => (isExisting(s) ? 'Say what the user will see or be able to do afterwards, not how to code it.' : 'Include things you already mentioned if you want them guaranteed. Details help: what does the user see, click, or get?'),
+    hint: 'No need to repeat your idea. For example, add what a button should do, an edge case, or a requirement you have not mentioned.',
   },
   {
     id: 'data', label: 'Data & accounts', priority: 'important', type: 'single',
@@ -1526,6 +1526,9 @@ function strength() {
 /* ---------- 5. Structured prompt builder ---------- */
 const val = (id) => (hasContent(state.answers[id]) && state.answers[id].source !== 'delegate') ? answerText(state.answers[id]) : '';
 const delegated = (id) => dimStatus(id) === 'delegate';
+// An opening answer is verbatim context, not an inferred product fact or a new requirement.
+const usesOpeningBrief = (id) => !!state.answers[id]?.fromDescription
+  && state.answers[id].text === state.description && !(state.answers[id].choices || []).length;
 const delegateLine = (id) => dimText(DIM_BY_ID[id].delegate) ||'Use your best judgment here and tell me what you chose.';
 const section = (title, body) => (body && String(body).trim() ? `## ${title}\n${String(body).trim()}\n\n` : '');
 const has = (s, re) => re.test(s || '');
@@ -1757,7 +1760,7 @@ function buildChangeRequest() {
   if (kind === 'review') what += reviewIncludesFixes()
     ? '\n\nReview the app as it is, fix the two or three improvements with the most impact, then give me the remaining improvements as a ranked list of suggestions. Tell me which fixes you will make before you edit; leave all other findings for me to choose from.'
     : "\n\nI want you to review the app as it is and tell me what you would improve, ranked. Don't change any code until I've picked from your list.";
-  if (kind === 'both') what += "\n\nMake the changes listed below. Beyond those, tell me what else you would improve — as suggestions I can choose from, not as changes.";
+  if (kind === 'both') what += "\n\nMake the changes in my description together with the additional details below. Beyond that request, tell me what else you would improve — as suggestions I can choose from, not as changes.";
   out += section(kind === 'review' ? 'What I want' : 'What I want changed', what);
 
   const app = [];
@@ -1782,8 +1785,8 @@ function buildChangeRequest() {
     if (changes.length) out += section('Known problems or wanted changes', changes.map((c) => `- ${c}`).join('\n') + '\n\nPut these at the top of your list; they are not the whole list.');
   } else {
     out += section('What should change', changes.length
-      ? changes.map((c, i) => `${i + 1}. ${c}`).join('\n') + (kind === 'both' ? '\n\nThese are the changes to make. Anything else you would improve goes in your list of suggestions.' : '\n\nThis list is the whole request. Nothing else changes unless I say so.')
-      : "I haven't listed the changes separately — work from the description above. Before you change anything, write out the changes you believe I'm asking for as a numbered list and confirm them with me.");
+      ? changes.map((c, i) => `${i + 1}. ${c}`).join('\n') + '\n\nThese details add to the requirements in my original description; keep both. Follow any explicit corrections I made. Do not discard an original requirement just because I did not repeat it here.' + (kind === 'both' ? ' Anything else you would improve goes in your list of suggestions.' : ' Changes beyond that combined request need my approval.')
+      : 'Use the requirements in my original description as the change checklist. I do not need to repeat them here. Ask only for essential missing details before making the requested changes.');
   }
   out += section('What must stay the same', preserveBody() || 'Everything I have not mentioned must keep working exactly as it does now, including how saved data loads.');
   out += section('How I run and test it', runAndTestBody());
@@ -1849,7 +1852,7 @@ function videoDeliverableBody() {
 function videoUnspecifiedBody() {
   const open = VIDEO_DIMS.filter((d) => ['missing', 'skipped'].includes(dimStatus(d.id)));
   if (!open.length) return '';
-  return `I have not specified: ${open.map((d) => d.label.toLowerCase()).join(', ')}. Make sensible choices for unspecified creative details and briefly state them. Missing product facts, selling points, brand details, and destinations are unresolved, not permission to invent them; obtain anything essential before rendering. An unanswered or skipped voiceover means no spoken narration.`;
+  return `I have not answered these topics separately: ${open.map((d) => d.label.toLowerCase()).join(', ')}. Use details already supplied in my original idea or other answers. Make sensible choices only for remaining creative details and briefly state them. Missing product facts, selling points, brand details, and destinations are unresolved, not permission to invent them; obtain anything essential before rendering. An unanswered or skipped voiceover means no spoken narration.`;
 }
 
 function videoRulesBody() {
@@ -1877,6 +1880,7 @@ function buildVideoPrompt() {
   const quote = (text) => String(text).split(/\r?\n/).map((line) => `> ${line}`).join('\n');
   const detail = (id, placeholder) => {
     if (delegated(id)) return VIDEO_DIMS.find((d) => d.id === id).delegate;
+    if (usesOpeningBrief(id)) return 'Use the product facts in my original idea above. Confirm any essential missing product fact or selling point before rendering; do not invent it.';
     if (['missing', 'skipped'].includes(dimStatus(id))) return placeholder;
     return quote(val(id));
   };
@@ -1951,7 +1955,7 @@ function wallpaperRulesBody() {
 
 /** Narration stays opt-in even when an AI rewrite adds an unsolicited script section. */
 function wallpaperNarrationRequested() {
-  const supplied = [state.description, ...WALLPAPER_DIMS.filter((d) => !['missing', 'skipped', 'delegate'].includes(dimStatus(d.id))).map((d) => val(d.id)), ...state.extraQA.map((answer) => answer.a)].join('\n');
+  const supplied = [state.description, ...WALLPAPER_DIMS.filter((d) => !usesOpeningBrief(d.id) && !['missing', 'skipped', 'delegate'].includes(dimStatus(d.id))).map((d) => val(d.id)), ...state.extraQA.map((answer) => answer.a)].join('\n');
   if (videoVoiceoverVariantsRequested(supplied)) return true;
   return !videoVoiceoverRefused(supplied) && /\b(?:voice[ -]?over|narration|narrator|spoken (?:words|audio|dialogue|poem)|read[^.!?\n]*aloud)\b/i.test(supplied);
 }
@@ -1961,6 +1965,7 @@ function buildWallpaperPrompt() {
   const quote = (text) => String(text).split(/\r?\n/).map((line) => `> ${line}`).join('\n');
   const detail = (dim) => {
     if (delegated(dim.id)) return dim.delegate;
+    if (usesOpeningBrief(dim.id)) return 'Use the scene in my original idea above. Ask for an essential missing subject or reference before rendering; do not invent a supplied fact.';
     if (['missing', 'skipped'].includes(dimStatus(dim.id))) return `[${dim.label.toLowerCase()} — use any details in my original description; otherwise not specified]`;
     return quote(val(dim.id));
   };
@@ -1998,8 +2003,8 @@ function buildStructuredPrompt() {
 
   const feats = toList(val('coreFeatures'));
   const fbody = feats.length
-    ? feats.map((f, i) => `${i + 1}. ${f}`).join('\n') + '\n\nThis list is the checklist for version 1. Nothing else is required until all of these work.'
-    : "I haven't listed the features separately — work from the description above. Before you build anything, write out the must-have features you believe are required as a numbered list and confirm them with me.";
+    ? feats.map((f, i) => `${i + 1}. ${f}`).join('\n') + '\n\nThese details add to the requirements in my original description; keep both as the checklist for version 1. Follow any explicit corrections I made. Do not discard an original requirement just because I did not repeat it here.'
+    : 'Use the requirements in my original description as the checklist for version 1. I do not need to repeat them here. Ask only for essential missing details before building.';
   out += section('Must-have features (version 1)', fbody);
 
   const nice = toList(val('niceToHave'));
@@ -2031,7 +2036,7 @@ function unspecifiedBody() {
   if (isWallpaper()) return wallpaperUnspecifiedBody();
   if (isVideo()) return videoUnspecifiedBody();
   const unspec = unspecifiedDims();
-  return unspec.length ? `I haven't decided on: ${unspec.map((d) => dimLabel(d).toLowerCase()).join(', ')}. Make sensible, simple choices for these and tell me what you chose — ask me first only if a choice would significantly change the result. If anything above seems to settle one of these, treat it as open anyway; this list wins.` : '';
+  return unspec.length ? `I have not answered these topics separately: ${unspec.map((d) => dimLabel(d).toLowerCase()).join(', ')}. Keep any details already supplied in my original description or other answers. Make sensible, simple choices only for what remains unspecified and tell me what you chose — ask me first only if a choice would significantly change the result.` : '';
 }
 function rulesBody() {
   if (isWallpaper()) return wallpaperRulesBody();
@@ -2466,7 +2471,8 @@ function knownSummary() {
   const lines = [];
   for (const d of activeDims()) {
     const s = dimStatus(d.id);
-    if (s === 'answered') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])}`);
+    if (usesOpeningBrief(d.id)) lines.push(`- ${dimLabel(d)} (${d.id}): use the opening brief in PROJECT DESCRIPTION. This is supplied context, not extracted or verified facts. Do not ask for the same overview again; ask only a specific essential detail that is actually missing.`);
+    else if (s === 'answered') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])}`);
     else if (s === 'detected') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])} (${state.answers[d.id].assumed ? 'assumed by default' : 'inferred from the description'}${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
     else if (s === 'delegate') lines.push(`- ${dimLabel(d)} (${d.id}): (the person said: let the AI decide)`);
     else if (s === 'skipped') lines.push(`- ${dimLabel(d)} (${d.id}): (the person chose to skip this — do not ask again)`);
@@ -2513,7 +2519,8 @@ function polishUserMessage() {
   const lines = [];
   for (const d of activeDims()) {
     const s = dimStatus(d.id);
-    if (s === 'answered' || s === 'detected') lines.push(`${dimLabel(d)}: ${answerText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
+    if (usesOpeningBrief(d.id)) lines.push(`${dimLabel(d)}: use the supplied opening brief in PROJECT DESCRIPTION; do not invent missing facts.`);
+    else if (s === 'answered' || s === 'detected') lines.push(`${dimLabel(d)}: ${answerText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
     else if (s === 'delegate') lines.push(`${dimLabel(d)}: let the AI decide`);
   }
   for (const x of state.extraQA) lines.push(`${x.q}: ${x.a}`);
@@ -2557,6 +2564,7 @@ function renderBrief() {
     let v = '', cls = '';
     if (s === 'delegate') { v = 'Let the AI decide'; cls = 'faint'; }
     else if (s === 'skipped') { v = 'Skipped'; cls = 'faint'; }
+    else if (usesOpeningBrief(d.id)) v = 'Saved from your opening brief. You can edit these details from your finished prompt.';
     else v = answerText(a);
     const pill = s === 'detected' ? `<span class="pill detected">${a.assumed ? 'assumed' : 'detected'}</span>` : s === 'delegate' ? '<span class="pill delegate">AI decides</span>' : s === 'skipped' ? '<span class="pill skipped">skipped</span>' : a.via === 'ai' ? '<span class="pill ai">✦</span>' : '';
     items.push(`<li class="brief-item"><div class="k"><span>${esc(dimLabel(d))}</span>${pill}</div><div class="v ${cls}">${esc(v)}</div></li>`);
@@ -2619,7 +2627,10 @@ function readAnswer() {
   const q = questionById(state.current);
   const choices = $$('#q-chips .chip.selected').map((c) => c.dataset.v);
   const text = $('#q-free').value.trim();
-  return { q, answer: { choices, text, source: 'user' } };
+  const answer = { choices, text, source: 'user' };
+  // Keeping an unchanged opening answer must not duplicate its full text in the exported brief.
+  if (usesOpeningBrief(state.current) && text === state.description && !choices.length) answer.fromDescription = true;
+  return { q, answer };
 }
 async function advance() {
   if (state.single) { state.single = false; await buildResult(); return; }
@@ -2657,7 +2668,11 @@ async function advance() {
 function invalidatePolish() { state.prompt.polished = ''; state.prompt.truncated = false; }
 function onNext() {
   const { q, answer } = readAnswer();
-  if (!answer.choices.length && !answer.text) { toast(q.type === 'text' ? 'Type an answer, or use Skip / Let the AI decide' : 'Pick an option, type something, or skip'); return; }
+  if (!answer.choices.length && !answer.text) {
+    // These questions add detail to the opening; an empty Next means there is nothing to add.
+    if (q.kind === 'dim' && ['purpose', 'coreFeatures'].includes(q.id)) { onSkip(); return; }
+    toast(q.type === 'text' ? 'Type an answer, or use Skip / Let the AI decide' : 'Pick an option, type something, or skip'); return;
+  }
   commitAnswer(state.current, answer);
   invalidatePolish();
   // Raise a doubt while the answer is still fresh, not only on the result screen.
@@ -2720,6 +2735,15 @@ async function startInterview() {
     runDetection(); // detectors that depend on the mode (code access) can run now
   } else if (!isMedia() && !wantsExisting && isExisting()) {
     toast('Sounds like a change to an existing app — asking the questions for that. Not right? Change the Starting point answer in the brief.', '', 6000);
+  }
+  // The selected tab and written opening already answer the overview; ask for the next detail.
+  if (!isMedia() && !state.answers.startingPoint) {
+    state.answers.startingPoint = { choices: ['From scratch'], text: '', source: 'user', note: 'selected on the first screen' };
+    runDetection();
+  }
+  if (isMedia()) {
+    const topic = isWallpaper() ? 'wallpaperSubject' : 'videoProduct';
+    state.answers[topic] = { choices: [], text, source: 'user', fromDescription: true, note: 'from your opening brief' };
   }
   showScreen('refine');
   renderBrief();
@@ -2808,7 +2832,7 @@ function renderResult() {
     const guess = st === 'detected' && isUnconfirmed(state.answers[d.id]);
     const cls = guess ? 'delegate' : st === 'answered' || st === 'detected' ? 'ok' : st;
     const icon = cls === 'ok' ? '✓' : cls === 'delegate' ? '≈' : st === 'skipped' ? '–' : '○';
-    const v = guess ? 'from your description' : st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
+    const v = usesOpeningBrief(d.id) ? 'from your opening brief' : guess ? 'from your description' : st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
     const action = cls === 'ok' ? 'edit' : guess ? 'confirm' : 'answer';
     const actionLabel = action[0].toUpperCase() + action.slice(1) + ' ' + dimLabel(d);
     cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(dimLabel(d))}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" aria-label="${esc(actionLabel)}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${action}</button></li>`);

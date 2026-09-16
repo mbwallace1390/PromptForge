@@ -158,7 +158,7 @@ async function answerLoop(page, maxSteps = 20) {
     } else if (chips.length) {
       await page.click('#q-chips .chip >> nth=' + Math.min(1, chips.length - 1));
       if (/tools|language/i.test(q)) await page.fill('#q-free', 'It should match my existing Kotlin code.');
-    } else if (/must the first version/i.test(q)) {
+    } else if (/extra details should the first version/i.test(q)) {
       await page.fill('#q-free', 'Log a flight with date, model and duration\nTrack charge cycles per battery\nShow who is flying this weekend');
     } else if (/name/i.test(q)) { await page.click('#q-skip'); continue; }
     else await page.fill('#q-free', 'Mostly so I stop losing track of which batteries are getting old.');
@@ -173,7 +173,7 @@ function checkPinned(page, text, label) {
   check(!/^#+\s*Overview/m.test(text) && text.includes('This is the AI-polished version.') && text.includes('1. Log flights'), label + ': "### Overview" filler headings not removed (or their content lost)');
   check(!/Duplicate section/.test(text) && text.includes('## Look & feel\nClean.'), label + ': repeated section not dropped');
   check(!/^\s*---\s*$/m.test(text), label + ': dangling rule line kept');
-  check(/## Things I didn't specify\nI haven't decided on:/.test(text), label + ': canonical "Things I didn\'t specify" missing');
+  check(/## Things I didn't specify\nI have not answered these topics separately:/.test(text), label + ': canonical "Things I didn\'t specify" missing');
   check(/## How to work with me\n(- .*\n)*- Before you write any code/.test(text) && text.trim().endsWith('doing something different.'), label + ': canonical rules missing or not last');
   // The model's deliverable is always dropped; ours appears once, before the unspecified list — or not at all when nothing was chosen.
   const iDeliver = text.indexOf('## What I want from you'), iUnspec = text.indexOf("## Things I didn't specify");
@@ -316,8 +316,8 @@ await test('Test 3: AI mode (mock server)', async () => {
   check(structured.includes('Additional details') && structured.includes('battery cycles be tracked'), 'AI "other" answer missing from structured prompt');
   check(/## Who it's for\n10–50 \(my answer to: "Roughly how many club members will use it\?"\)\n/.test(structured), 'AI "covers: users" answer must be quoted with its question, without the canned audience note');
   // Built-in essentials come first, then the AI rounds; the features question is one of them.
-  check(asked.some((q) => /must the first version/i.test(q)), 'essential built-in question (features) not asked in AI mode');
-  check(asked.findIndex((q) => /must the first version/i.test(q)) < asked.findIndex((q) => /battery cycles be tracked/.test(q)), 'built-in essentials should be asked before the AI questions');
+  check(asked.some((q) => /extra details should the first version/i.test(q)), 'essential built-in question (features) not asked in AI mode');
+  check(asked.findIndex((q) => /extra details should the first version/i.test(q)) < asked.findIndex((q) => /battery cycles be tracked/.test(q)), 'built-in essentials should be asked before the AI questions');
   check(/1\. Log a flight with date, model and duration/.test(structured), 'features answered after AI rounds missing from the prompt');
   fs.writeFileSync(path.join(SHOTS, 'prompt-ai-structured.md'), structured);
   // settings modal: fetch models + test connection
@@ -444,7 +444,7 @@ await test('Test 8: toList and deriveTitle', async () => {
   check(pinned.startsWith('# My Title\n\nIntro line.\n\n## Must‑have features\n1. Alpha'), 'bold lines were not turned into headings');
   check(!/Model copy|Model rule/.test(pinned), "model's bold-line copies of the pinned sections were not stripped");
   check((pinned.match(/How to work with me/g) || []).length === 1 && (pinned.match(/Things I didn't specify/g) || []).length === 1, 'pinned sections should appear exactly once');
-  check(/this list wins/.test(pinned), 'the unspecified list should declare precedence');
+  check(/Keep any details already supplied in my original description or other answers/.test(pinned), 'unanswered topics must preserve supplied requirements');
   // Open questions: delegated bullets go, a padded list goes, a short real list stays, a review has none.
   const oq = (body) => page.evaluate((s) => window.PromptForge.pinSections(s), '# T\n\nIntro.\n\n## Open questions\n' + body + '\n## Constraints\nNone.\n');
   check(/## Open questions\n- Real doubt one\n- Real doubt two\n/.test(await oq('- Real doubt one\n- Real doubt two\n')), 'two genuine open questions should be kept');
@@ -578,7 +578,7 @@ await test('Test 14: sanity hints', async () => {
   await page.fill('#idea', 'A web app to catalog my book series in chronological order.');
   await page.click('#start-btn');
   await page.waitForSelector('#screen-refine:not(.hidden)');
-  check(await skipUntil(page, /must the first version/i), 'features question not reached');
+  check(await skipUntil(page, /extra details should the first version/i), 'features question not reached');
   await page.fill('#q-free', 'View series info'); await page.click('#q-next');
   check(/where that information comes from/.test(await page.$eval('#toast', (el) => el.textContent)), 'no toast when the only feature looks things up without a source');
   // Experience is essential now, so it comes before the important questions.
@@ -616,7 +616,7 @@ await test('Test 14b: warning precision', async () => {
     await page.fill('#idea', desc);
     await page.click('#start-btn');
     await page.waitForSelector('#screen-refine:not(.hidden)');
-    check(await skipUntil(page, /must the first version/i), 'features question not reached');
+    check(await skipUntil(page, /extra details should the first version/i), 'features question not reached');
     await page.fill('#q-free', features); await page.click('#q-next');
     if (dataChip !== null) {
       check(await skipUntil(page, /remember anything between uses/i), 'data question not reached');
@@ -663,7 +663,7 @@ await test('Test 15: canonicalised AI answers', async () => {
   check(/## Data and accounts\nNothing needs to persist between sessions — keep it stateless and simple\. \(I answered: "No, it's okay if data is lost between uses"\.\)\n/.test(prompt), 'AI data answer not classified as "none" and quoted: ' + (/## Data and accounts\n[^\n]*/.exec(prompt) || [])[0]);
   check(/## Technology\nNo strong preference\./.test(prompt), '"Not sure — you decide" not treated as a delegation');
   check(/## What I want from you\nI'm new to this, so give me the simplest thing that runs/.test(prompt), 'beginner default for the deliverable missing');
-  check(!/I haven't decided on:[^\n]*what you want back/.test(prompt), 'deliverable still listed as unspecified despite the beginner default');
+  check(!/I have not answered these topics separately:[^\n]*what you want back/.test(prompt), 'deliverable still listed as unspecified despite the beginner default');
   check(/nothing needs to be saved/i.test(await page.$eval('#sanity', (el) => el.textContent)), 'catalog + "data is lost between uses" did not raise the sanity hint');
   await page.context().close();
 });
@@ -795,12 +795,12 @@ await test('Test 19: existing-app mode', async () => {
   check(detected.includes('Type = Mobile app'), 'type not detected');
   const asked = [];
   const answer = async (re, fn) => { check(await walkUntil(page, re, asked), `question not asked: ${re}`); await fn(); await page.click('#q-next'); };
-  await answer(/Why this change/, () => page.fill('#q-free', 'Members keep asking for it'));
-  await answer(/What should be different/, () => page.fill('#q-free', 'Export all flights to CSV\nAdd a share button on the export'));
+  await answer(/extra details to add to the changes/, () => page.fill('#q-free', 'Export all flights to CSV\nAdd a share button on the export'));
   await answer(/What is it built with/, async () => check((await page.$eval('#q-free', (el) => el.value)) === 'Kotlin.', 'built-with box should be pre-filled from the description'));
   await answer(/comfortable are you with code/, () => page.click('#q-chips .chip >> nth=2'));
   await answer(/What must not change/, () => page.fill('#q-free', 'Existing flights must still load\nKeep the current look'));
   await answer(/How do you run and test/, () => page.fill('#q-free', 'Gradle in Android Studio; no tests'));
+  await answer(/extra background/, () => page.fill('#q-free', 'Members keep asking for it'));
   await answer(/What do you want the AI to give you/, async () => {
     const chips = await page.$$eval('#q-chips .chip', (els) => els.map((e) => e.textContent));
     check(chips[1] === 'Only the changed parts (a patch / diff)', 'deliverable chips should be the change-request set: ' + chips.join(' | '));
@@ -843,7 +843,7 @@ await test('Test 20: existing-app switch + AI mode line', async () => {
   const asked = [];
   check(await walkUntil(page, /battery cycles be tracked/, asked), 'AI question not reached in existing-app mode');
   log('  asked before the AI round: ' + asked.join(' | '));
-  check(asked.some((q) => /What should be different/.test(q)), 'existing-app questions not asked after the switch');
+  check(asked.some((q) => /extra details to add to the changes/.test(q)), 'existing-app questions not asked after the switch');
   check(!asked.some((q) => /How will the AI get at your code|What kind of app is it|What is it built with/.test(q)), 'with the project open in the agent, the code-access, kind and built-with questions are noise');
   check(!asked.some((q) => /Where does it need to run|Who's going to use|remember anything between uses/.test(q)), 'from-scratch questions asked after the switch');
   const call = mockCalls.find((c) => /software consultant/.test(c.sys));
@@ -865,10 +865,10 @@ await test('Test 21: review mode', async () => {
   const asked = [];
   const answer = async (re, fn) => { check(await walkUntil(page, re, asked), `question not asked: ${re}`); await fn(); await page.click('#q-next'); };
   await answer(/What matters most right now/, async () => { await page.click('#q-chips .chip >> nth=0'); await page.click('#q-chips .chip >> nth=1'); });
-  await answer(/Why this change/, () => page.fill('#q-free', 'It has grown for two years without anyone stepping back'));
   await answer(/comfortable are you with code/, () => page.click('#q-chips .chip >> nth=1'));
   await answer(/What must not change/, () => page.fill('#q-free', 'Keep the sync working'));
   await answer(/How do you run and test/, () => page.fill('#q-free', 'npx expo start; I test on my phone'));
+  await answer(/extra background/, () => page.fill('#q-free', 'It has grown for two years without anyone stepping back'));
   await answer(/What do you want the AI to give you/, async () => {
     const chips = await page.$$eval('#q-chips .chip', (els) => els.map((e) => e.textContent));
     check(chips[0] === 'A ranked list of improvements — no code changes yet', 'deliverable chips should be the review set: ' + chips.join(' | '));
@@ -877,7 +877,7 @@ await test('Test 21: review mode', async () => {
   await walkUntil(page, /never matches/, asked);
   await page.waitForSelector('#screen-result:not(.hidden)');
   log('  asked: ' + asked.join(' | '));
-  check(!asked.some((q) => /What should be different when this is done/.test(q)), 'a review must not demand a change list');
+  check(!asked.some((q) => /extra details to add to the changes/.test(q)), 'a review must not demand a change list');
   check(!asked.some((q) => /What kind of app is it|What is it built with|How will the AI get at your code/.test(q)), 'with the app open in Claude Code, kind, built-with and code access must not be asked');
   const prompt = await promptText(page);
   fs.writeFileSync(path.join(SHOTS, 'prompt-review-request.md'), prompt);
@@ -890,7 +890,7 @@ await test('Test 21: review mode', async () => {
   check(/- Don't change any code until I've picked from your list\. Suggest, rank, explain — then wait for me\./.test(prompt), 'review rule missing');
   check(!/Make the requested changes first|For every file you change|Keep the change as small|must-have feature/.test(prompt), 'rules about making changes do not belong in a review');
   check(/- Give me the whole list in one message, most impactful first/.test(prompt), 'review wrap-up rule missing');
-  check(!/I haven't decided on:[^\n]*(what should change|what you want back|connections)/.test(prompt), 'unspecified list should not name the change list, the deliverable or connections in a review');
+  check(!/I have not answered these topics separately:[^\n]*(what should change|what you want back|connections)/.test(prompt), 'unspecified list should not name the change list, the deliverable or connections in a review');
   await page.context().close();
 });
 

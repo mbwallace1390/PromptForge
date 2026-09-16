@@ -77,7 +77,7 @@ try {
 
   await test('early finish includes the answer currently being typed', async (page) => {
     await begin(page);
-    for (let i = 0; i < 8 && await page.locator('#q-text').textContent() !== "What's the main problem this solves, or the main thing it should help someone do?"; i++) await page.click('#q-skip');
+    for (let i = 0; i < 8 && await page.locator('#q-text').textContent() !== 'Is there any extra background that would help the AI understand your request?'; i++) await page.click('#q-skip');
     await page.fill('#q-free', 'Find the right recipe before the groceries expire.');
     await page.click('#finish-btn');
     assert.match(await page.locator('#prompt-view').textContent(), /Find the right recipe before the groceries expire/);

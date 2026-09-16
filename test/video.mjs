@@ -121,7 +121,7 @@ try {
 
   await test('full video interview retains the brief without asking software questions', async page => {
     await page.click('[data-depth="thorough"]');
-    await beginVideo(page, 'I want to create a product advertisement.');
+    await beginVideo(page, answers.videoProduct);
     const seen = [];
     for (let i = 0; i < 10; i++) {
       const { current, screen } = await page.evaluate(() => window.PromptForge.state);
@@ -134,20 +134,31 @@ try {
       await next(page);
     }
     assert.equal(await page.locator('#screen-result').isVisible(), true, 'the bounded video interview did not finish');
-    assert.deepEqual([...seen].sort(), [...videoIds].sort(), 'thorough mode must cover the video brief');
+    assert.deepEqual([...seen].sort(), videoIds.filter(id => id !== 'videoProduct').sort(), 'thorough mode must cover the remaining video topics without repeating the opening');
     const prompt = await page.locator('#prompt-view').textContent();
     for (const answer of Object.values(answers)) assert.ok(prompt.includes(answer), `Lost supplied detail: ${answer}`);
     assert.match(prompt, /## Voiceover script/);
     assert.doesNotMatch(prompt, /\b(?:npm|tech stack|source code)\b/i);
     const coverage = await page.locator('#coverage [data-ask]').evaluateAll(items => items.map(item => item.dataset.ask));
     assert.ok(coverage.length > 0 && coverage.every(id => videoIds.includes(id)), 'result coverage exposes software questions');
+    assert.ok(coverage.includes('videoProduct'), 'the opening product must remain editable');
+    await page.locator('#coverage [data-ask="videoProduct"]').click();
+    assert.equal(await page.inputValue('#q-free'), answers.videoProduct);
+    const editedProduct = answers.videoProduct + ' Use the blue glaze in every scene.';
+    await page.fill('#q-free', editedProduct);
+    await next(page);
+    const revised = await page.locator('#prompt-view').textContent();
+    assert.ok(revised.includes(editedProduct), 'editing the opening product must update the prompt');
+    for (const answer of Object.values(answers)) assert.ok(revised.includes(answer), `Editing the product lost a supplied detail: ${answer}`);
   });
 
-  await test('early finish includes the unfinished product answer', async page => {
-    await beginVideo(page, 'I want to create a product advertisement.');
-    assert.equal(await page.evaluate(() => window.PromptForge.state.current), 'videoProduct');
-    await page.fill('#q-free', 'The Hiker Cup folds flat and fits in a jacket pocket.');
-    assert.match(await finish(page), /The Hiker Cup folds flat and fits in a jacket pocket\./);
+  await test('early finish includes the unfinished audience answer and opening product', async page => {
+    await beginVideo(page, 'The Hiker Cup folds flat and fits in a jacket pocket.');
+    assert.equal(await page.evaluate(() => window.PromptForge.state.current), 'videoAudience');
+    await page.fill('#q-free', 'Weekend hikers who carry everything in a small pack.');
+    const prompt = await finish(page);
+    assert.match(prompt, /Weekend hikers who carry everything in a small pack\./);
+    assert.match(prompt, /The Hiker Cup folds flat and fits in a jacket pocket\./);
   });
 
   for (const [name, answer] of [

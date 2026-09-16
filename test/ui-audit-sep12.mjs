@@ -21,42 +21,44 @@ async function test(name, fn) {
   } catch (error) { failed++; console.error('FAIL ' + name + ': ' + error.message); }
   finally { await context.close(); }
 }
-async function audience(page) {
+async function placement(page) {
   await page.click('[data-mode="video"]');
   await page.fill('#idea', 'A product video for a folding cup.');
   await page.click('#start-btn');
-  await page.fill('#q-free', 'Fold Cup; collapses for travel.');
-  await page.click('#q-next');
   assert.equal(await page.evaluate(() => PromptForge.state.current), 'videoAudience');
+  await page.fill('#q-free', 'Campers who pack light.');
+  await page.click('#q-next');
+  assert.equal(await page.evaluate(() => PromptForge.state.current), 'videoPlacement');
 }
 
 await test('Back retains unfinished text and Finish includes it after returning', async page => {
-  await audience(page);
-  await page.fill('#q-free', 'Campers who pack light.');
+  await placement(page);
+  await page.fill('#q-free', 'Instagram Reels in a vertical format.');
   await page.click('#q-back');
-  assert.equal(await page.evaluate(() => PromptForge.state.answers.videoAudience), undefined, 'Back must not confirm the draft');
+  assert.equal(await page.evaluate(() => PromptForge.state.answers.videoPlacement), undefined, 'Back must not confirm the draft');
   await page.click('#q-next');
-  assert.equal(await page.inputValue('#q-free'), 'Campers who pack light.');
+  assert.equal(await page.inputValue('#q-free'), 'Instagram Reels in a vertical format.');
   await page.click('#finish-btn');
-  assert.match(await page.textContent('#prompt-view'), /Campers who pack light\./);
+  assert.match(await page.textContent('#prompt-view'), /Instagram Reels in a vertical format\./);
 });
 
 await test('Back retains selected options and their unfinished detail', async page => {
-  await audience(page);
-  await page.fill('#q-free', 'Campers.');
+  await placement(page);
+  await page.fill('#q-free', 'Instagram Reels.');
   await page.click('#q-next');
+  assert.equal(await page.evaluate(() => PromptForge.state.current), 'videoLength');
   const option = await page.locator('#q-chips .chip').first().textContent();
   await page.locator('#q-chips .chip').first().click();
-  await page.fill('#q-free', 'Leave extra space at the bottom.');
+  await page.fill('#q-free', 'Allow time to read the closing text.');
   await page.click('#q-back');
   await page.click('#q-next');
   assert.equal(await page.locator('#q-chips .chip.selected').textContent(), option);
-  assert.equal(await page.inputValue('#q-free'), 'Leave extra space at the bottom.');
+  assert.equal(await page.inputValue('#q-free'), 'Allow time to read the closing text.');
 });
 
 await test('Back preserves a cleared edit instead of restoring the old answer', async page => {
-  await audience(page);
-  await page.fill('#q-free', 'An audience I want to replace.');
+  await placement(page);
+  await page.fill('#q-free', 'A placement I want to replace.');
   await page.click('#q-next');
   await page.click('#q-back');
   await page.fill('#q-free', '');
@@ -67,14 +69,14 @@ await test('Back preserves a cleared edit instead of restoring the old answer', 
 
 for (const action of ['skip', 'delegate']) {
   await test(`${action} withdraws a restored draft`, async page => {
-    await audience(page);
-    await page.fill('#q-free', 'Discard this audience draft.');
+    await placement(page);
+    await page.fill('#q-free', 'Discard this placement draft.');
     await page.click('#q-back');
     await page.click('#q-next');
     await page.click('#q-' + action);
     await page.click('#q-back');
     assert.equal(await page.inputValue('#q-free'), '');
-    assert.doesNotMatch(await page.evaluate(() => buildStructuredPrompt()), /Discard this audience draft/);
+    assert.doesNotMatch(await page.evaluate(() => buildStructuredPrompt()), /Discard this placement draft/);
   });
 }
 

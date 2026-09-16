@@ -1,5 +1,19 @@
 # PromptForge audits
 
+## September 16, 2026 — opening brief and follow-up questions
+
+Confirmed that the new-app flow could ask the starting-point question after the user chose **New app or tool**, while product video and wallpaper always repeated the opening product/scene question. Software goal and feature wording also asked users to repeat requirements and could make the later feature list override the original description.
+
+The new-app choice now supplies the starting point unless explicit existing-work or rewrite detection says otherwise. Media flows retain the opening words as editable context and begin with audience or phone/use. They reference that context in prompts and AI summaries without repeating the full opening or claiming missing product facts are verified. Specific missing facts can still be clarified. Saved or manually edited briefs are not re-seeded on load.
+
+Software feature and background questions ask for additional details. An empty **Next** on those two built-in questions means there is nothing to add; other questions retain their validation. Added details join the original requirements, and unanswered-topic instructions no longer override facts already supplied in the opening brief. Coverage editing, Back navigation, history, and opt-in narration remain covered.
+
+### Verification
+
+The initial ten-check regression suite reproduced nine failures on the previous build. Independent review found that the new blank-Next guidance still hit the old required-answer validation; a failing regression reproduced that issue before repair, with a negative check preserving required-question validation. Existing media and navigation tests were updated for the intentionally changed first questions while retaining their original assertions about saved data, precise wording, and drafts.
+
+The final complete suite passed **180 tests** with installed Chrome (`PF_BROWSER_CHANNEL=chrome`), including 12 opening-brief regression checks. `git diff --check` passed, and independent review found no remaining actionable findings. AI responses were mocked; no paid provider calls were made.
+
 ## September 16, 2026 — animated wallpaper workflow
 
 Added **Video or animation → Animated wallpaper** beside the existing **Product video** subtype. The homepage still has three main choices. The new eight-topic interview covers the scene, phone and intended screen, style, movement, looping, duration, clock/icon space, and references. It works in built-in mode without an API key, with its own optional AI questions and rewrite instructions.
