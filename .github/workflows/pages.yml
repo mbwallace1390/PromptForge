@@ -1,6 +1,7 @@
 name: Deploy to GitHub Pages
 
-# Publishes the app at https://<owner>.github.io/PromptForge/ on every push to main.
+# Publishes the app at https://<owner>.github.io/PromptForge/ on every push to main, once the test suite
+# passes: a commit that breaks the app never replaces the working live copy.
 # The repo keeps promptforge.html by that name; only the deployed copy is called index.html.
 on:
   push:
@@ -9,16 +10,35 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # npm ci runs the postinstall step, which downloads Playwright's Chromium.
+      - run: npm ci
+      - name: Install Chromium's system libraries
+        run: npx playwright install-deps chromium
+      - name: Run the test suite
+        run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
