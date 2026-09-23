@@ -5,11 +5,12 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 const html = readFileSync(process.env.PF_FILE || new URL('../promptforge.html', import.meta.url), 'utf8');
-const script = html.split('<script>')[1].split('/* ---------- 6.')[0];
+// The app script is the block holding the numbered sections; a small theme script runs before it in <head>.
+const script = html.split('<script>').find((part) => part.includes('/* ---------- 1. Utilities')).split('/* ---------- 6.')[0];
 const answer = (text, choices = []) => ({ text, choices, source: 'user' });
 function app(answers = {}, description = 'Create a video for the Fold Cup.') {
   const context = vm.createContext({
-    window: {}, document: { documentElement: { setAttribute() {} } },
+    window: {}, document: { documentElement: { setAttribute() {} }, querySelector() { return null; } },
     localStorage: { getItem() { return null; }, setItem() {} },
     answers, description,
   });

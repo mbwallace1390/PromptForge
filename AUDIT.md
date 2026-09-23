@@ -1,5 +1,26 @@
 # PromptForge audits
 
+## September 23, 2026 — look, prompt accuracy, settings, and a test gate before deploy
+
+Walked every screen in the browser at desktop and phone widths, in both themes, and generated new-app, change-request and review prompts. Confirmed problems were fixed; each new check was run against the previous build and failed there before passing here.
+
+| Area | Confirmed problem | Result |
+| --- | --- | --- |
+| Prompt accuracy | Pressing **Next** with the box empty on the two "extra details" questions, as those questions invite, was stored as *skipped*. The brief showed a red "skipped" pill, coverage dropped, and the prompt listed "must-have features" or "what should change" under *Things I didn't specify*, telling the AI to make its own choices about what to build or change. A test meant to catch this matched retired wording and could not fail. | An empty Next is stored as "nothing to add": shown neutrally, counted as covered, and described to the AI as covered by the opening description. The feature/change list is never listed as unanswered, since its section always points at the opening description. The test now matches the current wording and fails on the old build. |
+| Theme | Light theme kept dark native scrollbars, the Service dropdown and checkboxes; the browser bar stayed dark; a light-theme visitor could see a dark flash while the page loaded; the first visit froze the system theme as a saved choice. | Each theme sets `color-scheme`, the `theme-color` meta follows the theme, a small head script applies the theme before first paint, and the page follows the system setting until the toggle is used. |
+| Phone layout | On the question card, **Next** wrapped alone to the bottom-left under Skip and Let the AI decide. | Secondary actions share a row and Next has a full-width row below them. |
+| Result screen | The AI offer left a stray period after an inline button, which became a 44px block on phones. Change requests aimed at an agent with the project open still pointed only at web chats. | The offer is one short sentence with a proper button. When the AI will see the code in an editor, the note says to paste the prompt there because a web chat cannot see the code. |
+| Titles | Change requests got mid-sentence titles ("…needs a way to export all…"); reviews read "Review request: Review my…". Reviews also told the AI to explore "before changing anything". | Titles stop at the verb after a plain name ("My Expo app for tracking RC flights"), while a verb inside a clause ("Website where the menu is…") keeps the full title; the review title drops the repeated verb unless the person named the project; reviews explore "before suggesting anything". |
+| Settings | Every "Free & local" service, including OpenRouter, Groq and Gemini, was offered Ollama model names, and a blank model silently fell back to one of them. | No model names are suggested before Fetch list; the placeholder is written per service; Test and Save ask for a model instead of saving a setup that cannot work. A setup saved without a model by an older build shows **AI: finish setup** and stays in built-in mode instead of failing every call. |
+| Saved briefs | The list showed seconds, no kind of brief, and every delete button was named just "Delete". | Each entry shows its kind (New app, Change, Review, Video, Wallpaper), a short date and "coverage"; Open and Delete name their brief. A damaged saved entry still lists. |
+| Deploy | Every push went live without running the tests. | The Pages workflow runs `npm test` first and deploys only when it passes. |
+
+The idea box placeholder now starts with "e.g." so it no longer reads as filled-in text, and page changes respect reduced motion.
+
+### Verification
+
+The complete suite passed **186 tests** (180 before; 6 new tests plus new checks inside existing end-to-end tests) in 83 seconds with Playwright's Chromium. Fail-first: all new or repaired checks failed on the previous build (3 opening-brief, 4 appearance, 1 resilience, 8 end-to-end failures) and pass on this one. Two content suites read the app by taking the first `<script>` block, which is now the theme script; they now select the app script by its section header and pass on both builds. An independent review found three more problems, each confirmed by measurement: old model-less setups would have failed every call, the verb rule shortened some new-app titles mid-clause, and the early-theme test passed under Playwright's light default even with a head script that ignored the saved theme. All three are fixed; the theme test now runs with a dark system setting, and reintroducing either the model-less setup or a storage-blind head script makes its check fail. Browser checks covered 1280px and 390px, both themes, and all three result kinds. Dependencies are current and `npm audit` reports zero vulnerabilities. AI responses were mocked; no paid provider calls were made.
+
 ## September 16, 2026 — opening brief and follow-up questions
 
 Confirmed that the new-app flow could ask the starting-point question after the user chose **New app or tool**, while product video and wallpaper always repeated the opening product/scene question. Software goal and feature wording also asked users to repeat requirements and could make the later feature list override the original description.

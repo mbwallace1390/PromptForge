@@ -118,7 +118,8 @@ try {
       await begin(page, mode, description);
       const originalOnly = await finish(page);
       assert.ok(originalOnly.includes(description));
-      assert.doesNotMatch(originalOnly, /I haven't decided on:[^\n]*must-have features/i, 'A skipped details question cannot make the stated opening requirements undecided');
+      // Both wordings the unanswered-topics line has used; matching only the retired one made this check unable to fail.
+      assert.doesNotMatch(originalOnly, /I (?:haven't decided on|have not answered these topics separately):[^\n]*(?:must-have features|what should change)/i, 'A skipped details question cannot make the stated opening requirements undecided');
       await page.locator('#coverage [data-ask="coreFeatures"]').click();
       const help = await page.locator('#q-why').textContent() + ' ' + await page.locator('#q-hint').textContent();
       assert.match(help, /(?:opening|original|already mentioned|already described)/i, 'The details question acknowledges supplied requirements');
@@ -163,10 +164,54 @@ try {
         await page.click('#q-next');
         await page.waitForSelector('#screen-result:not(.hidden)');
         const state = await page.evaluate(() => PromptForge.state);
-        assert.equal(state.answers[topic]?.source, 'skipped', `${mode} ${topic} records that no extra detail was supplied`);
+        assert.equal(state.answers[topic]?.nothingToAdd, true, `${mode} ${topic} records that the opening already covers it`);
+        assert.notEqual(state.answers[topic]?.source, 'skipped', 'An empty Next is an answer the question invited, not a skip');
         assert.equal(state.answers[topic]?.text, '');
         assert.ok((await page.locator('#prompt-view').textContent()).includes(description), 'Skipping additional detail must retain the original request');
       }
+    }
+  });
+
+  await test('an empty Next on the extra-details questions reads as covered, never as a gap', async page => {
+    for (const [mode, description, label] of [
+      ['new', 'A pottery notebook with firing temperatures and glaze exports.', 'Must-have features'],
+      ['existing', 'Add glaze exports to my existing pottery notebook.', 'What should change'],
+    ]) {
+      await page.reload();
+      await begin(page, mode, description);
+      const blanks = [];
+      for (let i = 0; i < 20; i++) {
+        const { screen, current } = await page.evaluate(() => ({ screen: PromptForge.state.screen, current: PromptForge.state.current }));
+        if (screen === 'result') break;
+        if (['purpose', 'coreFeatures'].includes(current)) {
+          // The question itself says "press Next to keep your brief as it is"; do exactly that.
+          await page.fill('#q-free', '');
+          await page.click('#q-next');
+          blanks.push(current);
+          if (current === 'coreFeatures') {
+            const item = await page.evaluate(label => [...document.querySelectorAll('#brief-list .brief-item')]
+              .map(li => li.textContent.replace(/\s+/g, ' ').trim()).find(t => t.startsWith(label)), label);
+            assert.match(item || '', /Nothing to add/, `${mode}: the brief should say the opening covers it`);
+            assert.doesNotMatch(item, /skipped/i, `${mode}: an invited empty Next must not be shown as skipped`);
+          }
+        } else if (await page.locator('#q-chips .chip').count()) {
+          await page.locator('#q-chips .chip').first().click();
+          await page.click('#q-next');
+        } else {
+          await page.fill('#q-free', 'Keep everything else as it is.');
+          await page.click('#q-next');
+        }
+      }
+      await page.waitForSelector('#screen-result:not(.hidden)');
+      assert.ok(blanks.includes('coreFeatures'), `${mode}: the details question was asked`);
+      for (const topic of blanks) {
+        const row = await page.evaluate(topic => { const li = document.querySelector(`#coverage [data-ask="${topic}"]`).closest('li'); return { cls: li.className, text: li.textContent }; }, topic);
+        assert.equal(row.cls, 'ok', `${mode} ${topic}: counted as covered in the coverage list`);
+        assert.match(row.text, /covered by your description/);
+      }
+      const prompt = await page.locator('#prompt-view').textContent();
+      assert.ok(prompt.includes(description));
+      assert.doesNotMatch(prompt, /I have not answered these topics separately:[^\n]*(?:must-have features|what should change|goal)/i, `${mode}: the opening requirements must not be handed to the AI as undecided`);
     }
   });
 

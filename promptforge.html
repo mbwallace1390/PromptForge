@@ -9,9 +9,21 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161a22'/%3E%3Cpath d='M32 10c6 8 12 12 12 22a12 12 0 0 1-24 0c0-5 2-8 4-11 0 5 2 7 4 8 0-9 2-14 4-19z' fill='%23f5a524'/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
+<script>
+/* Pick the theme before the first paint, so a light-theme visitor never sees a dark flash while the rest of the page loads. */
+(function () {
+  var t = null;
+  try { t = JSON.parse(localStorage.getItem('pf_theme')); } catch (e) { /* storage unavailable or unreadable */ }
+  if (t !== 'light' && t !== 'dark') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  var bar = document.querySelector('meta[name="theme-color"]'); // the browser bar too (the same colours as --bg below)
+  if (bar) bar.setAttribute('content', t === 'light' ? '#f4f5f9' : '#0f1115');
+})();
+</script>
 <style>
 /* ---------- Design tokens ---------- */
 :root {
+  color-scheme: dark; /* native scrollbars, dropdowns and checkboxes follow the chosen theme, not the OS */
   --bg: #0f1115;
   --bg-2: #161a22;
   --bg-3: #1d222c;
@@ -40,6 +52,7 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 [data-theme="light"] {
+  color-scheme: light;
   --bg: #f4f5f9;
   --bg-2: #ffffff;
   --bg-3: #eef0f5;
@@ -305,6 +318,7 @@ main { max-width: 1120px; margin: 0 auto; padding: clamp(1.2rem, 4vw, 2.6rem) cl
 .notice.bad { border-color: var(--bad); background: var(--bad-soft); color: var(--text); }
 .notice + .notice { margin-top: .6rem; }
 .notice.quiet { background: transparent; border: 0; padding: .35rem 0 .85rem; font-size: .83rem; }
+.notice.ai-offer { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .75rem; }
 .polish-status { display: flex; align-items: center; gap: .7rem; border-color: var(--accent); color: var(--text); margin-bottom: .8rem; }
 .polish-status .spin { width: 18px; height: 18px; border: 3px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; flex: none; }
 .polish-status span { flex: 1; }
@@ -358,6 +372,10 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
   .idea-foot .controls { justify-content: space-between; width: 100%; }
   #start-btn { width: 100%; }
   .idea-shortcut { display: none; }
+  /* Phones: the secondary actions share a row and Next gets a full-width row of its own, instead of wrapping alone to the left. */
+  .q-actions .spacer { display: none; }
+  .q-actions .btn { flex: 1 1 auto; }
+  #q-next { flex-basis: 100%; order: 1; }
   .result-heading h1 { font-size: 1.6rem; }
   #prompt-view { padding: 1.1rem; font-size: .93rem; }
   .result-toolbar .tabs { width: 100%; margin-bottom: .2rem; }
@@ -504,7 +522,7 @@ footer.foot { text-align: center; color: var(--faint); font-size: .8rem; margin-
         <span>Open in:</span>
         <button class="btn sm" id="open-claude" type="button">Claude</button>
         <button class="btn sm" id="open-chatgpt" type="button">ChatGPT</button>
-        <span class="tiny muted">(copies the prompt and opens the site — paste if it isn't pre-filled. Claude shows a "use caution" notice for any prompt that arrives from a link; that's normal, just send it.)</span>
+        <span class="tiny muted" id="open-in-note">(copies the prompt and opens the site — paste if it isn't pre-filled. Claude shows a "use caution" notice for any prompt that arrives from a link; that's normal, just send it.)</span>
       </div>
     </div>
 
@@ -656,7 +674,8 @@ function toList(text) {
 const DEFAULT_MODELS = {
   anthropic: ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001', 'claude-fable-5-1'],
   openai: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-6-astra'],
-  custom: ['llama3.1', 'qwen2.5-coder', 'mistral'],
+  // None for "Free & local": each service has its own names, and "Fetch list" asks it for them.
+  custom: [],
 };
 /**
  * Ready-made "Free & local" services. All speak the OpenAI chat format and accept calls from a browser
@@ -700,22 +719,31 @@ if (settings.apiTimeoutMs === 45000) settings.apiTimeoutMs = 0; // saved by an e
 function saveSettings() { store.set('pf_settings', settings); refreshAiBadge(); }
 function aiEnabled() {
   if (settings.provider === 'none') return false;
-  if (settings.provider === 'custom') return !!settings.baseUrl;
+  // A "Free & local" setup saved by an older build may have no model: there is no default to fall back on,
+  // so treat it as unfinished (built-in mode, "finish setup" badge) instead of failing every call.
+  if (settings.provider === 'custom') return !!settings.baseUrl && !!settings.model;
   return !!settings.apiKey;
 }
 function currentModel(config = settings) {
-  return config.model || (DEFAULT_MODELS[config.provider] || [''])[0];
+  return config.model || (DEFAULT_MODELS[config.provider] || [])[0] || '';
 }
 // A request keeps the provider and credentials it started with, even if Settings changes mid-flight.
 function settingsSnapshot(config = settings) { return { ...config, freeModels: Array.isArray(config.freeModels) ? [...config.freeModels] : [] }; }
-function applyTheme(t) {
+/** Show a theme. `remember` saves it as the person's choice; until they make one, the page follows the system setting. */
+function applyTheme(t, remember = true) {
   document.documentElement.setAttribute('data-theme', t);
-  store.set('pf_theme', t);
+  // The browser bar (and an installed app's title bar) matches the page instead of staying dark.
+  const bar = document.querySelector('meta[name="theme-color"]');
+  if (bar) bar.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || (t === 'light' ? '#f4f5f9' : '#0f1115'));
+  if (remember) store.set('pf_theme', t);
 }
 (function initTheme() {
-  const saved = store.get('pf_theme', null);
-  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-  applyTheme(saved || (prefersLight ? 'light' : 'dark'));
+  const system = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+  const fromSystem = () => (system && system.matches ? 'light' : 'dark');
+  const chosen = () => { const t = store.get('pf_theme', null); return t === 'light' || t === 'dark' ? t : null; };
+  applyTheme(chosen() || fromSystem(), false);
+  // Until the toggle is used, follow the system as it changes (an automatic evening dark mode, for example).
+  if (system && system.addEventListener) system.addEventListener('change', () => { if (!chosen()) applyTheme(fromSystem(), false); });
 })();
 
 /* ---------- 3. Dimensions ----------
@@ -1320,7 +1348,13 @@ function answerText(a) {
   if (!parts.length && a.hits && a.hits.length) parts.push(a.hits.join(', '));
   return parts.join(' — ');
 }
-function hasContent(a) { return !!(a && (a.source === 'delegate' || (a.choices && a.choices.length) || (a.text && a.text.trim()) || (a.hits && a.hits.length))); }
+// `nothingToAdd` is an empty Next on a question that only adds to the opening brief: the brief already answers it.
+function hasContent(a) { return !!(a && (a.source === 'delegate' || a.nothingToAdd || (a.choices && a.choices.length) || (a.text && a.text.trim()) || (a.hits && a.hits.length))); }
+/** The questions that ask only for detail beyond the opening description. */
+const EXTRA_DETAIL_DIMS = ['purpose', 'coreFeatures'];
+const NOTHING_TO_ADD = 'nothing to add beyond the opening description';
+/** An answer as prose for the AI: its text, or what an empty "nothing to add" answer means. */
+const summaryText = (a) => (a && a.nothingToAdd ? NOTHING_TO_ADD : answerText(a));
 /** Phrases spotted in the description that the user has not confirmed yet (the question is still asked, pre-filled). */
 const isUnconfirmed = (a) => !!(a && a.source === 'detected' && a.ask);
 function dimStatus(id) {
@@ -1540,8 +1574,13 @@ function deriveTitle(description = state.description, name = val('name')) {
   t = t.replace(/^(build|make|create|write|develop)\s+(me\s+)?(an?|the|my)?\s*/i, '').replace(/^(an?|the)\s+/i, '').replace(/[.!?]+$/, '');
   // "Discord bot for our RC club that posts the weather from an…" — cut at the clause instead of mid-phrase.
   if (t.length > 40) {
-    const m = /^(.{12,}?\S)(?:,|\s+(?:that|which|where|who|so|because|to let|to help)\s)/i.exec(t);
-    if (m && wordCount(m[1]) >= 2) t = m[1];
+    const clause = /^(.{12,}?\S)(?:,|\s+(?:that|which|where|who|so|because|to let|to help)\s)/i.exec(t);
+    // A change request names the app, then its verb: "My Expo app for tracking flights needs a CSV export…". Only a
+    // plain noun phrase may end at the verb; "Website where the menu is…" and "…whether the door is open" keep their clause.
+    const verb = /^(.{12,}?\S)\s+(?:needs?|should|must|is|are|keeps?|gets?|has|crashes|doesn['’]?t|isn['’]?t|won['’]?t|can['’]?t)\s/i.exec(t);
+    const plainVerb = verb && !/\b(?:where|whether|if|when|that|which|who|while|because|so)\b/i.test(verb[1]) ? verb[1] : '';
+    const cut = [clause ? clause[1] : '', plainVerb].filter((c) => c && wordCount(c) >= 2).sort((a, b) => a.length - b.length)[0];
+    if (cut) t = cut;
   }
   if (t.length > 70) t = t.slice(0, 67).replace(/\s+\S*$/, '') + '…';
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : 'My project';
@@ -1709,7 +1748,10 @@ function unspecifiedDims() {
   return DIMS.filter((d) => {
     if (d.when && !d.when(state)) return false;
     if (['name', 'niceToHave', 'outOfScope', 'successCriteria', 'purpose', 'preserve'].includes(d.id)) return false; // preserve has a stated default
-    if (isReviewOnly() && ['coreFeatures', 'deliverable', 'integrations'].includes(d.id)) return false; // a review has no change list, a default deliverable, and discovers the integrations itself
+    // The features / changes section always points at the opening description, which is the requirement list.
+    // Calling it unanswered here would tell the AI to "make sensible choices" about what to build or change.
+    if (d.id === 'coreFeatures') return false;
+    if (isReviewOnly() && ['deliverable', 'integrations'].includes(d.id)) return false; // a review has a default deliverable and discovers the integrations itself
     if (d.id === 'deliverable' && beginnerDeliverable()) return false; // covered by the beginner default
     const s = dimStatus(d.id);
     return s === 'missing' || s === 'skipped';
@@ -1737,7 +1779,7 @@ function codeAccessBody() {
   const c = (a.choices || []).join(' '); const extra = (a.text || '').trim();
   if (/github/i.test(c)) return `The code is on GitHub${extra ? ` (${extra})` : ' — I will share the link'}. Read the relevant parts before proposing changes.`;
   if (/paste/i.test(c)) return "I'll paste the files you ask for. Tell me which files you need to see before you change anything, and never guess at code you haven't seen." + (extra ? ' ' + extra : '');
-  if (/editor/i.test(c)) return 'You have the project open in your editor. Explore it before changing anything: the structure, the conventions, how it is built and run.' + (extra ? ' ' + extra : '');
+  if (/editor/i.test(c)) return `You have the project open in your editor. Explore it before ${isReviewOnly() ? 'suggesting' : 'changing'} anything: the structure, the conventions, how it is built and run.` + (extra ? ' ' + extra : '');
   if (/describe/i.test(c)) return "You won't see the code. Work from my description, state every assumption you make about names and structure, and give me changes I can apply by hand." + (extra ? ' ' + extra : '');
   return answerText(a);
 }
@@ -1753,7 +1795,10 @@ function runAndTestBody() {
 /** A change to an app that exists: what it is, how to reach it, what changes, what must not. */
 function buildChangeRequest() {
   const kind = reviewKind();
-  let out = `# ${kind === 'review' ? 'Review request' : 'Change request'}: ${deriveTitle()}\n\n`;
+  // "Review request: Review my Expo app" says it twice; keep the object of the review.
+  // Only a title taken from the description: a project named "Review the Day" keeps its name.
+  const title = kind === 'review' && !val('name') ? capFirst(deriveTitle().replace(/^review\s+(?=(?:my|our|the|this)\b)/i, '')) : deriveTitle();
+  let out = `# ${kind === 'review' ? 'Review request' : 'Change request'}: ${title}\n\n`;
   let what = state.description.trim();
   const purpose = val('purpose');
   if (purpose) what += `\n\nWhy: ${purpose}`;
@@ -2472,7 +2517,7 @@ function knownSummary() {
   for (const d of activeDims()) {
     const s = dimStatus(d.id);
     if (usesOpeningBrief(d.id)) lines.push(`- ${dimLabel(d)} (${d.id}): use the opening brief in PROJECT DESCRIPTION. This is supplied context, not extracted or verified facts. Do not ask for the same overview again; ask only a specific essential detail that is actually missing.`);
-    else if (s === 'answered') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])}`);
+    else if (s === 'answered') lines.push(`- ${dimLabel(d)} (${d.id}): ${summaryText(state.answers[d.id])}`);
     else if (s === 'detected') lines.push(`- ${dimLabel(d)} (${d.id}): ${answerText(state.answers[d.id])} (${state.answers[d.id].assumed ? 'assumed by default' : 'inferred from the description'}${isUnconfirmed(state.answers[d.id]) ? ' — a keyword match, worth confirming if it matters' : ''})`);
     else if (s === 'delegate') lines.push(`- ${dimLabel(d)} (${d.id}): (the person said: let the AI decide)`);
     else if (s === 'skipped') lines.push(`- ${dimLabel(d)} (${d.id}): (the person chose to skip this — do not ask again)`);
@@ -2520,7 +2565,7 @@ function polishUserMessage() {
   for (const d of activeDims()) {
     const s = dimStatus(d.id);
     if (usesOpeningBrief(d.id)) lines.push(`${dimLabel(d)}: use the supplied opening brief in PROJECT DESCRIPTION; do not invent missing facts.`);
-    else if (s === 'answered' || s === 'detected') lines.push(`${dimLabel(d)}: ${answerText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
+    else if (s === 'answered' || s === 'detected') lines.push(`${dimLabel(d)}: ${summaryText(state.answers[d.id])}${s === 'detected' ? ' (inferred from the description)' : ''}`);
     else if (s === 'delegate') lines.push(`${dimLabel(d)}: let the AI decide`);
   }
   for (const x of state.extraQA) lines.push(`${x.q}: ${x.a}`);
@@ -2537,14 +2582,15 @@ function showScreen(name) {
     el.classList.toggle('active', n === idx);
     el.classList.toggle('done', n < idx);
   });
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; // the CSS rule cannot reach a scripted scroll
+  window.scrollTo({ top: 0, behavior: calm ? 'auto' : 'smooth' });
 }
 function refreshAiBadge() {
   const on = aiEnabled();
   const b = $('#ai-badge');
   b.classList.toggle('on', on);
   const names = { anthropic: 'Claude', openai: 'OpenAI', custom: (PRESET_BY_ID[settings.preset] || PRESET_BY_ID.other).short };
-  $('#ai-badge-text').textContent = on ? `AI: ${names[settings.provider] || 'on'}` : 'AI: off';
+  $('#ai-badge-text').textContent = on ? `AI: ${names[settings.provider] || 'on'}` : settings.provider !== 'none' ? 'AI: finish setup' : 'AI: off';
 }
 
 /* --- Refine screen --- */
@@ -2564,6 +2610,7 @@ function renderBrief() {
     let v = '', cls = '';
     if (s === 'delegate') { v = 'Let the AI decide'; cls = 'faint'; }
     else if (s === 'skipped') { v = 'Skipped'; cls = 'faint'; }
+    else if (a.nothingToAdd) { v = 'Nothing to add. Your opening description covers it.'; cls = 'faint'; }
     else if (usesOpeningBrief(d.id)) v = 'Saved from your opening brief. You can edit these details from your finished prompt.';
     else v = answerText(a);
     const pill = s === 'detected' ? `<span class="pill detected">${a.assumed ? 'assumed' : 'detected'}</span>` : s === 'delegate' ? '<span class="pill delegate">AI decides</span>' : s === 'skipped' ? '<span class="pill skipped">skipped</span>' : a.via === 'ai' ? '<span class="pill ai">✦</span>' : '';
@@ -2669,8 +2716,12 @@ function invalidatePolish() { state.prompt.polished = ''; state.prompt.truncated
 function onNext() {
   const { q, answer } = readAnswer();
   if (!answer.choices.length && !answer.text) {
-    // These questions add detail to the opening; an empty Next means there is nothing to add.
-    if (q.kind === 'dim' && ['purpose', 'coreFeatures'].includes(q.id)) { onSkip(); return; }
+    // These questions add detail to the opening; an empty Next means the opening already covers it.
+    // That is an answer, not a skip: it must not read as a gap in the brief or invite the AI to fill one.
+    if (q.kind === 'dim' && EXTRA_DETAIL_DIMS.includes(q.id)) {
+      commitAnswer(state.current, { choices: [], text: '', source: 'user', nothingToAdd: true });
+      invalidatePolish(); advance(); return;
+    }
     toast(q.type === 'text' ? 'Type an answer, or use Skip / Let the AI decide' : 'Pick an option, type something, or skip'); return;
   }
   commitAnswer(state.current, answer);
@@ -2800,6 +2851,10 @@ function renderResult() {
     : isVideo()
     ? 'Review your brief, then copy it into a video-capable AI to create the finished video.'
     : 'Review your brief, then copy it into your AI coding tool to get started.';
+  // A web chat cannot see a project that lives on this computer; say where a change request belongs.
+  $('#open-in-note').textContent = aiSeesCode()
+    ? 'For a change to your app, paste the prompt into Claude Code, Cursor or Copilot with the project open. A web chat can\'t see your code.'
+    : '(copies the prompt and opens the site — paste if it isn\'t pre-filled. Claude shows a "use caution" notice for any prompt that arrives from a link; that\'s normal, just send it.)';
   const p = state.prompt;
   const text = p.view === 'polished' && p.polished ? p.polished : p.structured;
   $('#history-save-warning').classList.toggle('hidden', !state.historySaveFailed);
@@ -2813,7 +2868,7 @@ function renderResult() {
   $('#polish-btn').textContent = p.polished ? '✦ Polish again' : '✦ Polish with AI';
 
   const notice = $('#result-notice');
-  if (!aiEnabled()) { notice.className = 'notice quiet'; notice.innerHTML = 'Your brief is ready. For an optional AI rewrite, <button class="btn sm ghost" type="button" data-open-settings style="display:inline-flex;padding:.1rem .35rem;color:var(--info)">connect a provider in Settings</button>.'; }
+  if (!aiEnabled()) { notice.className = 'notice quiet ai-offer'; notice.innerHTML = '<span>Your brief is ready to use. An AI rewrite is optional.</span><button class="btn sm" type="button" data-open-settings>Connect a provider</button>'; }
   else if (p.view === 'polished' && p.polished && p.truncated) { notice.className = 'notice warn'; notice.textContent = "The AI-polished prompt hit the model's output limit and may be cut off at the end. Check it, or polish again."; }
   else if (p.view === 'polished' && p.polished) { notice.className = 'notice'; notice.textContent = isWallpaper() ? 'AI rewrite. Check suggested motion and export details against your preferences and phone. The Structured tab keeps your original answers.' : isVideo() ? 'AI rewrite. Check any suggested scenes or wording against your product facts. The Structured tab keeps your answers and the built-in scene template.' : "AI rewrite. Anything marked (suggested) is the AI's idea, not yours — delete what you don't want. The Structured tab holds only what you said."; }
   else notice.className = 'notice hidden';
@@ -2832,7 +2887,7 @@ function renderResult() {
     const guess = st === 'detected' && isUnconfirmed(state.answers[d.id]);
     const cls = guess ? 'delegate' : st === 'answered' || st === 'detected' ? 'ok' : st;
     const icon = cls === 'ok' ? '✓' : cls === 'delegate' ? '≈' : st === 'skipped' ? '–' : '○';
-    const v = usesOpeningBrief(d.id) ? 'from your opening brief' : guess ? 'from your description' : st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
+    const v = usesOpeningBrief(d.id) ? 'from your opening brief' : state.answers[d.id]?.nothingToAdd ? 'covered by your description' : guess ? 'from your description' : st === 'delegate' ? 'AI decides' : st === 'skipped' ? 'skipped' : st === 'missing' ? 'not asked' : '';
     const action = cls === 'ok' ? 'edit' : guess ? 'confirm' : 'answer';
     const actionLabel = action[0].toUpperCase() + action.slice(1) + ' ' + dimLabel(d);
     cov.push(`<li class="${cls}"><span class="ic">${icon}</span><span class="lbl">${esc(dimLabel(d))}${v ? ` <span class="tiny muted">· ${v}</span>` : ''}</span><button class="btn ghost sm" type="button" data-ask="${d.id}" aria-label="${esc(actionLabel)}" title="${cls === 'ok' ? 'Change this answer' : 'Answer this question'}">${action}</button></li>`);
@@ -3002,15 +3057,33 @@ function loadHistory(id) {
   showScreen('result'); renderResult();
   if (repaired) { saveHistory(); toast('Updated this saved brief to request the finished video.', 'ok'); }
 }
+/** What kind of brief a saved entry is, read from its answers the same way the prompt builder reads them. */
+function briefKind(e) {
+  const s = { mode: ['video', 'wallpaper'].includes(e.mode) ? e.mode : 'software', answers: e.answers && typeof e.answers === 'object' ? e.answers : {} };
+  try { return isWallpaper(s) ? 'Wallpaper' : isVideo(s) ? 'Video' : reviewKind(s) === 'review' ? 'Review' : isExisting(s) ? 'Change' : 'New app'; }
+  catch { return ''; } // a damaged saved entry must not stop the list (or the app) from rendering
+}
+/** "Sep 23, 7:42 AM" — the year only when it is not this one. */
+function shortDate(ts) {
+  const d = new Date(ts);
+  if (!Number.isFinite(d.getTime())) return '';
+  const opts = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return d.toLocaleString(undefined, opts);
+}
 function renderRecent() {
   const list = readHistory();
   $('#recent').classList.toggle('hidden', !list.length);
-  $('#recent-list').innerHTML = list.map((e) => `
+  $('#recent-list').innerHTML = list.map((e) => {
+    const title = e.title || 'Untitled';
+    const meta = [briefKind(e), shortDate(e.ts), `${Number(e.strength) || 0}% coverage`, e.prompt && e.prompt.polished ? '✦ polished' : ''].filter(Boolean).join(' · ');
+    return `
     <div class="recent-item">
-      <div class="t"><b>${esc(e.title || 'Untitled')}</b><span>${new Date(e.ts).toLocaleString()} · ${e.strength || 0}% ${e.prompt && e.prompt.polished ? '· ✦ polished' : ''}</span></div>
-      <button class="btn sm" type="button" data-load="${esc(e.id)}">Open</button>
-      <button class="btn icon ghost sm" type="button" data-del="${esc(e.id)}" aria-label="Delete">✕</button>
-    </div>`).join('');
+      <div class="t"><b>${esc(title)}</b><span>${esc(meta)}</span></div>
+      <button class="btn sm" type="button" data-load="${esc(e.id)}" aria-label="Open ${esc(title)}">Open</button>
+      <button class="btn icon ghost sm" type="button" data-del="${esc(e.id)}" aria-label="Delete ${esc(title)}" title="Delete">✕</button>
+    </div>`;
+  }).join('');
 }
 function deleteHistory(id) {
   const list = readHistory(), entry = list.find((x) => x.id === id);
@@ -3088,7 +3161,10 @@ function renderSettings() {
   $('#s-baseurl').value = draft.baseUrl || '';
   $('#s-key').value = draft.apiKey || '';
   $('#s-model').value = draft.model || '';
-  $('#s-model').placeholder = (DEFAULT_MODELS[p] || [''])[0] || 'model id';
+  $('#s-model').placeholder = p !== 'custom' ? (DEFAULT_MODELS[p] || [''])[0] || 'model id'
+    : draft.preset === 'openrouter' ? 'Fetch list, then pick a ":free" one'
+    : draft.preset === 'ollama' ? 'Fetch list to see your models'
+    : 'Fetch list, then pick one';
   $('#model-list').innerHTML = (DEFAULT_MODELS[p] || []).map((m) => `<option value="${esc(m)}">`).join('');
   $('#s-autopolish').checked = draft.autoPolish !== false;
   $('#model-help').textContent = p === 'anthropic' ? 'Leave blank to use ' + DEFAULT_MODELS.anthropic[0] + '. "Fetch list" pulls the current models from your account.'
@@ -3109,6 +3185,8 @@ function keyMissingMessage() {
   const name = draft.provider === 'anthropic' ? 'Claude' : draft.provider === 'openai' ? 'OpenAI' : (PRESET_BY_ID[draft.preset] || PRESET_BY_ID.other).short;
   return `${name} needs a key: use "Get a key" above, paste it into the API key box, then try again.`;
 }
+// "Free & local" has no default model to fall back on: each service names its own.
+const MODEL_MISSING = 'Choose a model first: press "Fetch list", then pick one in the Model box.';
 /** "localhost:11434/v1" typed without a scheme would be fetched as a relative path and fail silently. */
 const withScheme = (u) => (u && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? 'http://' + u : u);
 /**
@@ -3170,7 +3248,8 @@ function renderIdeaMode() {
     ? "Describe your product. I'll prepare a brief with scenes and optional narration for a video-capable AI to produce."
     : existing ? "Describe the app and what you'd like to improve — I'll ask about the details and turn it into a clear request for your AI coding tool."
       : "An app, a change, a product video, or an animated wallpaper. Explain it like you would to a friend — I'll ask about what's missing and turn it into a detailed AI prompt.";
-  $('#idea').placeholder = wallpaper ? WALLPAPER_EXAMPLES[0] : video ? VIDEO_EXAMPLES[0] : existing ? EXAMPLES[3] : EXAMPLES[0];
+  // "e.g." keeps the sample from reading as text that is already filled in.
+  $('#idea').placeholder = 'e.g. ' + (wallpaper ? WALLPAPER_EXAMPLES[0] : video ? VIDEO_EXAMPLES[0] : existing ? EXAMPLES[3] : EXAMPLES[0]);
   $('#idea-label').textContent = wallpaper ? 'What would you like on your phone screen?' : video ? 'What are you promoting?' : existing ? 'What would you like to change?' : 'Describe your idea';
   const examples = wallpaper ? WALLPAPER_EXAMPLES : video ? VIDEO_EXAMPLES : existing ? EXAMPLES.slice(3) : EXAMPLES.slice(0, 3);
   $('#examples').innerHTML = examples.map((e) => `<button type="button" class="chip example" data-ex="${esc(e)}">${esc(e.split(' ').slice(0, 7).join(' '))}…</button>`).join('');
@@ -3322,6 +3401,7 @@ function init() {
     const out = $('#s-test-result');
     readSettingsForm();
     if (keyNeeded() && !draft.apiKey) { out.textContent = keyMissingMessage(); return; }
+    if (draft.provider === 'custom' && !draft.model) { out.textContent = MODEL_MISSING; return; }
     const cfg = settingsSnapshot(draft), ctl = beginSettingsRequest();
     $('#s-test').disabled = true;
     out.textContent = 'Testing…' + (draft.provider === 'custom' && !keyNeeded() ? ' (a local model can take a minute to load the first time)' : '');
@@ -3341,6 +3421,7 @@ function init() {
     readSettingsForm();
     if (draft.provider === 'custom' && !/^https?:\/\//i.test(draft.baseUrl)) { toast('Enter a base URL that starts with http:// or https://', 'bad'); return; }
     if (keyNeeded() && !draft.apiKey) { toast(keyMissingMessage(), 'bad', 6000); return; }
+    if (draft.provider === 'custom' && !draft.model) { toast(MODEL_MISSING, 'bad', 6000); return; }
     Object.assign(settings, draft); saveSettings();
     // Rebuild the result before restoring focus, since it may replace the Settings opener.
     if (state.screen === 'result') renderResult();

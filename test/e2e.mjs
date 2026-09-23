@@ -430,6 +430,13 @@ await test('Test 8: toList and deriveTitle', async () => {
     ['A Discord bot that posts the weather for our field every morning.', 'Discord bot that posts the weather for our field every morning'],
     ['I want to build a little desktop program that watches a folder and renames my 3D printer files.', 'Little desktop program'],
     ['Something short.', 'Something short'],
+    // A change request names the app, then its verb; the title stops at the verb instead of mid-sentence.
+    ['My Expo app for tracking RC flights needs a way to export all flights to CSV and the list gets slow.', 'My Expo app for tracking RC flights'],
+    ['The flight log in my Android app doesn’t save the battery number anymore.', 'Flight log in my Android app'],
+    ['Add CSV export to my existing Android app. It is Kotlin with Room.', 'Add CSV export to my existing Android app'],
+    // ...but a verb inside a clause is not where the name ends.
+    ['A dashboard showing whether the garage door is open or closed.', 'Dashboard showing whether the garage door is open or closed'],
+    ['A website where the menu is always up to date for my bakery customers.', 'Website where the menu is always up to date for my bakery customers'],
   ];
   for (const [input, want] of titles) {
     const got = await page.evaluate((s) => window.PromptForge.deriveTitle(s, ''), input);
@@ -689,7 +696,13 @@ await test('Test 16: presets', async () => {
   check(/Not needed for a server on this computer/.test(await page.$eval('#key-help', (el) => el.textContent)), 'key help should say no key is needed for a local server');
   await page.selectOption('#s-preset', 'gemini');
   check((await page.$eval('#s-baseurl', (el) => el.value)) === 'https://generativelanguage.googleapis.com/v1beta/openai', 'Gemini preset did not fill its address');
+  // Free & local has no default model to fall back on, so a service must never be offered another one's names.
+  check(!/llama|qwen|mistral/i.test((await page.$eval('#s-model', (el) => el.placeholder)) + (await page.$eval('#model-list', (el) => el.innerHTML))), 'a cloud service should not be offered local model names');
   await page.fill('#s-key', 'k'); await page.click('#settings-save');
+  check(/Choose a model first/.test(await page.$eval('#toast', (el) => el.textContent)) && !(await page.$eval('#settings-modal', (el) => el.classList.contains('hidden'))), 'Save without a model should explain and keep Settings open');
+  await page.click('#s-test');
+  check(/Choose a model first/.test(await page.$eval('#s-test-result', (el) => el.textContent)), 'Test connection without a model should explain, not call the service');
+  await page.fill('#s-model', 'gemini-mock'); await page.click('#settings-save');
   check((await page.$eval('#ai-badge-text', (el) => el.textContent)) === 'AI: Gemini', 'badge should name the chosen service');
   // A rejected key reads as advice, not as the service's internal wording.
   await page.click('#settings-btn');
@@ -710,6 +723,17 @@ await test('Test 16: presets', async () => {
   check(/Connected ✓/.test(after429) && mockCalls.filter((c) => /connectivity/.test(c.sys)).length === 2, 'a 429 should be retried once and then succeed');
   await page.click('#settings-cancel');
   await page.context().close();
+  // An older build saved "Free & local" without a model and quietly used a local model name. That setup is unfinished
+  // now: the badge says so and the interview stays built-in, instead of sending an empty model on every call.
+  mockCalls = [];
+  const legacy = await newPage({ provider: 'custom', preset: 'ollama', baseUrl: 'http://localhost:8787/v1', apiKey: '', model: '', autoPolish: true, depth: 'quick' });
+  check((await legacy.$eval('#ai-badge-text', (el) => el.textContent)) === 'AI: finish setup', 'a setup without a model should say it needs finishing');
+  await legacy.fill('#idea', 'A Discord bot that posts the weather for our field every morning.');
+  await legacy.click('#start-btn');
+  await legacy.click('#finish-btn');
+  await legacy.waitForSelector('#screen-result:not(.hidden)');
+  check(mockCalls.length === 0, `a setup without a model must not call the service (${mockCalls.length} calls)`);
+  await legacy.context().close();
 });
 
 // ---------- Test 18: OpenRouter free-model fallbacks travel with the request ----------
@@ -882,6 +906,9 @@ await test('Test 21: review mode', async () => {
   const prompt = await promptText(page);
   fs.writeFileSync(path.join(SHOTS, 'prompt-review-request.md'), prompt);
   check(prompt.startsWith('# Review request: '), 'title should be a review request');
+  check(prompt.startsWith('# Review request: My existing mobile app'), 'the title should name the app, not repeat "Review": ' + prompt.split('\n')[0]);
+  check(/Explore it before suggesting anything/.test(prompt) && !/before changing anything/.test(prompt), 'a review explores before suggesting, not before changing');
+  check(/Claude Code, Cursor or Copilot with the project open/.test(await page.$eval('#open-in-note', (el) => el.textContent)), 'an app open in an editor agent should be pointed there, not at a web chat');
   check(/## What I want\n[\s\S]*Don't change any code until I've picked from your list\./.test(prompt), '"What I want" should say review first, no changes');
   check(/## What matters most\nSpeed and performance, Fewer bugs and crashes\n/.test(prompt), 'focus chips missing from the prompt');
   check(!/## What should change/.test(prompt) && !/I haven't listed the changes/.test(prompt), 'a review must not carry an (empty) change list');

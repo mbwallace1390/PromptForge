@@ -138,6 +138,61 @@ for (const theme of ['dark', 'light']) {
     assert.deepEqual(await page.evaluate(appearanceProblems, { focus: true }), []);
   });
 }
+await test('native controls and the browser bar follow the chosen theme', {}, async page => {
+  for (const theme of ['light', 'dark', 'light']) {
+    await page.evaluate(theme => applyTheme(theme), theme);
+    const got = await page.evaluate(() => ({
+      scheme: getComputedStyle(document.documentElement).colorScheme,
+      bar: document.querySelector('meta[name="theme-color"]').content,
+      bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+    }));
+    // Scrollbars, the Service dropdown and checkboxes are drawn from color-scheme, not from our variables.
+    assert.equal(got.scheme, theme, `color-scheme should be ${theme}`);
+    assert.equal(got.bar, got.bg, 'theme-color should match the page background');
+  }
+});
+// The system is dark here, so only the saved choice can produce a light page.
+await test('a saved light theme is in place before the app script runs', { colorScheme: 'dark' }, async page => {
+  await page.addInitScript(() => {
+    localStorage.setItem('pf_theme', JSON.stringify('light'));
+    // Record the theme the first time the parser reaches <body>: after the head, before the app script.
+    new MutationObserver((records, observer) => {
+      if (document.body && !('themeAtBody' in window)) {
+        window.themeAtBody = document.documentElement.getAttribute('data-theme');
+        window.barAtBody = document.querySelector('meta[name="theme-color"]').content;
+        observer.disconnect();
+      }
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await page.reload();
+  assert.equal(await page.evaluate(() => window.themeAtBody), 'light', 'a light-theme visitor would see a dark flash while the page loads');
+  assert.equal(await page.evaluate(() => window.barAtBody), await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()), 'the browser bar should already match');
+});
+await test('the theme follows the system until the toggle is used', { colorScheme: 'light' }, async page => {
+  assert.equal(await page.getAttribute('html', 'data-theme'), 'light');
+  assert.equal(await page.evaluate(() => localStorage.getItem('pf_theme')), null, 'the system preference must not be stored as a choice');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'dark');
+  await page.click('#theme-btn');
+  assert.equal(await page.getAttribute('html', 'data-theme'), 'light');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(50);
+  assert.equal(await page.getAttribute('html', 'data-theme'), 'light', 'a chosen theme must survive a system change');
+  await page.reload();
+  assert.equal(await page.getAttribute('html', 'data-theme'), 'light', 'a chosen theme must survive a reload');
+});
+await test('phone question actions give Next a full-width row below the others', { viewport: { width: 390, height: 844 } }, async page => {
+  await begin(page);
+  const layout = await page.evaluate(() => {
+    const row = document.querySelector('.q-actions').getBoundingClientRect();
+    const next = document.querySelector('#q-next').getBoundingClientRect();
+    const others = [...document.querySelectorAll('.q-actions .btn:not(#q-next)')].filter(b => b.getClientRects().length).map(b => b.getBoundingClientRect());
+    return { rowWidth: row.width, nextWidth: next.width, nextTop: next.top, othersBottom: Math.max(...others.map(r => r.bottom)) };
+  });
+  assert.ok(layout.nextWidth >= layout.rowWidth - 1, `Next should span the row (${layout.nextWidth} of ${layout.rowWidth})`);
+  assert.ok(layout.nextTop >= layout.othersBottom - 1, 'Next should sit below Skip and Let the AI decide, not wrap alone to the left');
+});
 for (const width of [320, 390]) {
   await test(`${width}px controls, editing and long content fit`, { viewport: { width, height: 844 } }, async page => {
     const problems = [];

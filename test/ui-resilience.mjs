@@ -66,6 +66,29 @@ await test('an unsaved warning does not follow a different saved brief', async p
   assert.equal(await page.locator('#history-save-warning').isVisible(), false);
 });
 
+await test('saved briefs name their kind, and a damaged entry still lists', async page => {
+  await page.evaluate(() => {
+    const now = Date.now();
+    const existing = { choices: ['Adding to an existing project (describe below)'], text: '', source: 'user' };
+    localStorage.setItem('pf_history', JSON.stringify([
+      { id: 'a', ts: now, title: 'Garden planner', mode: 'software', answers: { startingPoint: { choices: ['From scratch'], text: '', source: 'user' } }, strength: 40, prompt: {} },
+      { id: 'b', ts: now, title: 'Flight log export', mode: 'software', answers: { startingPoint: existing }, strength: 50, prompt: {} },
+      { id: 'c', ts: now, title: 'App review', mode: 'software', answers: { startingPoint: existing, changeKind: { choices: ["Review it and suggest improvements — I'm not sure what's needed"], text: '', source: 'user' } }, strength: 50, prompt: {} },
+      { id: 'd', ts: now, title: 'Mug reel', mode: 'video', answers: {}, strength: 30, prompt: { polished: '# Reel' } },
+      { id: 'e', ts: now, title: 'Moon lake', mode: 'wallpaper', answers: {}, strength: 30, prompt: {} },
+      { id: 'f', ts: now, title: 'Damaged', mode: 'software', answers: { startingPoint: { choices: 'not a list', source: 'user' } }, strength: 'x', prompt: null },
+    ]));
+  });
+  await page.reload();
+  const rows = await page.$$eval('.recent-item', els => els.map(e => ({ meta: e.querySelector('.t span').textContent, del: e.querySelector('[data-del]').getAttribute('aria-label') })));
+  assert.equal(rows.length, 6, 'every saved brief, including a damaged one, is listed');
+  assert.deepEqual(rows.slice(0, 5).map(r => r.meta.split(' · ')[0]), ['New app', 'Change', 'Review', 'Video', 'Wallpaper']);
+  assert.match(rows[3].meta, /30% coverage · ✦ polished$/);
+  assert.match(rows[5].meta, /0% coverage$/);
+  assert.ok(rows.every(r => !/\d:\d\d:\d\d/.test(r.meta)), 'dates should not show seconds');
+  assert.equal(rows[0].del, 'Delete Garden planner', 'each delete button names its brief');
+});
+
 for (const action of ['#clear-history', '[data-del]']) {
   await test(`saved briefs can be kept when removal is cancelled (${action})`, async page => {
     await page.fill('#idea', 'A recipe organizer for my family.');
