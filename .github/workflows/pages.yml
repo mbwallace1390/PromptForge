@@ -4,6 +4,8 @@ name: Deploy to GitHub Pages
 # passes: a commit that breaks the app never replaces the working live copy.
 # The repo keeps promptforge.html by that name; only the deployed copy is called index.html.
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -12,7 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages
+  # PR tests cancel only earlier tests for the same PR, never a live deployment.
+  group: pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,6 +38,7 @@ jobs:
         run: npm test
 
   deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
     permissions:
